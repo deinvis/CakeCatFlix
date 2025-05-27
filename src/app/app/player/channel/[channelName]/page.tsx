@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { VideoPlayer } from '@/components/player/video-player';
+import VideoPlayer from '@/components/player/video-player';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,12 +11,11 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Tv2 } from 'lucide-react';
 import { getAllPlaylistsMetadata, getChannelItemsByBaseNameAcrossPlaylists, getPlaylistMetadata, type ChannelItem } from '@/lib/db';
-// import type { MediaItemForPlayer } from '@/lib/constants'; // No longer used directly by VideoPlayer prop
 
 interface StreamOption {
-  id: string; 
-  label: string; 
-  streamUrl: string;
+  id: string;
+  label: string;
+  streamUrl: string; // This MUST be the original stream URL
   logoUrl?: string;
   playlistName: string;
   quality: string;
@@ -29,15 +28,17 @@ export default function ChannelPlayerPage() {
 
   const [streamOptions, setStreamOptions] = useState<StreamOption[]>([]);
   const [selectedStreamOptionId, setSelectedStreamOptionId] = useState<string | null>(null);
-  
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [channelTitle, setChannelTitle] = useState<string>(channelNameDecoded);
-  const [channelLogo, setChannelLogo] = useState<string | undefined>(undefined); // For the header logo
+  const [channelLogo, setChannelLogo] = useState<string | undefined>(undefined);
 
   const selectedStreamUrl = useMemo(() => {
     if (!selectedStreamOptionId) return null;
-    return streamOptions.find(opt => opt.id === selectedStreamOptionId)?.streamUrl || null;
+    const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
+    // Ensure this returns the ORIGINAL stream URL
+    return selectedOpt?.streamUrl || null;
   }, [selectedStreamOptionId, streamOptions]);
 
   const fetchChannelData = useCallback(async () => {
@@ -77,15 +78,15 @@ export default function ChannelPlayerPage() {
         const playlistName = playlistMeta?.name || `Fonte ${item.playlistDbId.slice(-4)}`;
         const quality = item.quality || 'Padrão';
         options.push({
-          id: `${item.playlistDbId}_${item.streamUrl}_${quality}`, 
+          id: `${item.playlistDbId}_${item.streamUrl}_${quality}`,
           label: `${playlistName} - ${quality}`,
-          streamUrl: item.streamUrl,
-          logoUrl: item.logoUrl, // Keep specific logo per option
+          streamUrl: item.streamUrl, // Store the original stream URL
+          logoUrl: item.logoUrl,
           playlistName: playlistName,
           quality: quality,
         });
       }
-      
+
       const qualityOrder = ['FHD', 'HD', 'SD', 'Padrão'];
       options.sort((a, b) => {
         if (a.playlistName.toLowerCase() !== b.playlistName.toLowerCase()) {
@@ -93,17 +94,16 @@ export default function ChannelPlayerPage() {
         }
         return qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality);
       });
-      
+
       setStreamOptions(options);
 
       if (options.length > 0) {
         const defaultHdOption = options.find(opt => opt.quality === 'HD');
         const defaultStandardOption = options.find(opt => opt.quality === 'Padrão');
         const defaultOption = defaultHdOption || defaultStandardOption || options[0];
-        
+
         setSelectedStreamOptionId(defaultOption.id);
-        // Update header logo based on default selection if it has a logo
-        if (defaultOption.logoUrl && !firstLogoOverall) { 
+        if (defaultOption.logoUrl && !firstLogoOverall) {
           setChannelLogo(defaultOption.logoUrl);
         }
       } else {
@@ -125,22 +125,13 @@ export default function ChannelPlayerPage() {
   const handleStreamSelectionChange = (selectedId: string) => {
     setSelectedStreamOptionId(selectedId);
     const selectedOpt = streamOptions.find(opt => opt.id === selectedId);
-    // Update the main channel logo in the header if the selected stream option has a specific logo
     if (selectedOpt?.logoUrl) {
       setChannelLogo(selectedOpt.logoUrl);
     } else {
-      // Fallback to the first logo found overall for the channel if the selected option has no logo
       const firstLogoOverall = streamOptions.find(opt => opt.logoUrl)?.logoUrl;
       setChannelLogo(firstLogoOverall);
     }
   };
-
-  const currentDisplayTitle = useMemo(() => {
-     if (!selectedStreamOptionId) return channelTitle;
-     const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
-     return selectedOpt ? `${channelTitle} (${selectedOpt.label})` : channelTitle;
-  }, [selectedStreamOptionId, streamOptions, channelTitle]);
-
 
   if (isLoading) {
     return (
@@ -177,7 +168,7 @@ export default function ChannelPlayerPage() {
       </div>
     );
   }
-  
+
   if (streamOptions.length === 0 && !isLoading) {
      return (
       <div className="container mx-auto p-4 md:p-6 text-center">
@@ -206,15 +197,15 @@ export default function ChannelPlayerPage() {
                 <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
             </Button>
         </div>
-      
-      <VideoPlayer src={selectedStreamUrl} />
+
+      <VideoPlayer src={selectedStreamUrl} title={channelTitle} />
 
       {streamOptions.length > 0 && (
         <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
             <div>
             <Label htmlFor="stream-select" className="mb-2 block font-medium text-foreground">Fonte / Qualidade</Label>
-            <Select 
-                value={selectedStreamOptionId || undefined} 
+            <Select
+                value={selectedStreamOptionId || undefined}
                 onValueChange={handleStreamSelectionChange}
             >
                 <SelectTrigger id="stream-select" className="w-full">
@@ -232,7 +223,7 @@ export default function ChannelPlayerPage() {
         </div>
       )}
       <div className="text-xs text-muted-foreground p-2 break-all">
-        URL Atual: {selectedStreamUrl || "Nenhuma"}
+        URL Atual para Player: {selectedStreamUrl || "Nenhuma"}
       </div>
     </div>
   );

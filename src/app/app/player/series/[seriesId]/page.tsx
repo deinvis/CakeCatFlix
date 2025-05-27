@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { VideoPlayer } from '@/components/player/video-player';
+import VideoPlayer from '@/components/player/video-player';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,29 +11,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Clapperboard, Tv } from 'lucide-react';
-import { 
-  getSeriesItemById, 
-  getEpisodesForSeriesAcrossPlaylists, 
-  getAllPlaylistsMetadata, 
+import {
+  getSeriesItemById,
+  getEpisodesForSeriesAcrossPlaylists,
+  getAllPlaylistsMetadata,
+  type SeriesItem,
+  type EpisodeItem,
+  type PlaylistMetadata
 } from '@/lib/db';
-import type { SeriesItem, EpisodeItem, PlaylistMetadata } from '@/lib/constants';
-// import type { MediaItemForPlayer } from '@/lib/constants'; // No longer used directly by VideoPlayer prop
 
 interface EpisodeSource {
   playlistId: string;
   playlistName: string;
-  streamUrl: string;
+  streamUrl: string; // This MUST be the original stream URL
   logoUrl?: string;
 }
 
 interface DisplayEpisode {
-  id: string; 
-  dbEpisodeId?: number; 
-  title: string; 
+  id: string;
+  dbEpisodeId?: number;
+  title: string;
   seasonNumber: number;
   episodeNumber: number;
   sources: EpisodeSource[];
-  primaryLogoUrl?: string; // A representative logo for this specific SxxExx, could be from one of its sources
+  primaryLogoUrl?: string;
 }
 
 interface GroupedEpisodes {
@@ -48,11 +49,11 @@ export default function SeriesPlayerPage() {
   const [seriesInfo, setSeriesInfo] = useState<SeriesItem | null>(null);
   const [allRawEpisodes, setAllRawEpisodes] = useState<EpisodeItem[]>([]);
   const [playlistMetas, setPlaylistMetas] = useState<Map<string, PlaylistMetadata>>(new Map());
-  
+
   const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const [selectedDisplayEpisode, setSelectedDisplayEpisode] = useState<DisplayEpisode | null>(null);
   const [selectedSourceStreamUrl, setSelectedSourceStreamUrl] = useState<string | null>(null);
-  
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +75,12 @@ export default function SeriesPlayerPage() {
       setSeriesInfo(seriesData);
 
       const playlists = await getAllPlaylistsMetadata();
+      if (playlists.length === 0) {
+        setError("Nenhuma playlist configurada.");
+        setAllRawEpisodes([]);
+        setIsLoading(false);
+        return;
+      }
       const activePlaylistIds = playlists.map(p => p.id);
       const metas = new Map(playlists.map(p => [p.id, p]));
       setPlaylistMetas(metas);
@@ -82,7 +89,6 @@ export default function SeriesPlayerPage() {
       setAllRawEpisodes(episodesData);
 
       if (episodesData.length > 0) {
-        // Auto-select the first season available
         const firstSeason = episodesData.reduce((min, ep) => Math.min(min, ep.seasonNumber || Infinity), Infinity);
         if (firstSeason !== Infinity) {
           setSelectedSeason(firstSeason.toString());
@@ -103,7 +109,7 @@ export default function SeriesPlayerPage() {
 
   const groupedAndSortedEpisodes = useMemo(() => {
     const groups: GroupedEpisodes = {};
-    const episodeMap = new Map<string, DisplayEpisode>(); 
+    const episodeMap = new Map<string, DisplayEpisode>();
 
     allRawEpisodes.forEach(rawEp => {
       if (rawEp.seasonNumber === undefined || rawEp.episodeNumber === undefined) return;
@@ -113,7 +119,7 @@ export default function SeriesPlayerPage() {
       const source: EpisodeSource = {
         playlistId: rawEp.playlistDbId,
         playlistName: playlistName,
-        streamUrl: rawEp.streamUrl,
+        streamUrl: rawEp.streamUrl, // Original stream URL
         logoUrl: rawEp.logoUrl,
       };
 
@@ -125,13 +131,13 @@ export default function SeriesPlayerPage() {
         }
       } else {
         episodeMap.set(episodeKey, {
-          id: `${seriesNumericId}_${episodeKey}`, 
+          id: `${seriesNumericId}_${episodeKey}`,
           dbEpisodeId: rawEp.id,
-          title: rawEp.title, 
+          title: rawEp.title,
           seasonNumber: rawEp.seasonNumber,
           episodeNumber: rawEp.episodeNumber,
           sources: [source],
-          primaryLogoUrl: source.logoUrl || seriesInfo?.logoUrl, 
+          primaryLogoUrl: source.logoUrl || seriesInfo?.logoUrl,
         });
       }
     });
@@ -156,19 +162,18 @@ export default function SeriesPlayerPage() {
   const handleEpisodePlay = (episode: DisplayEpisode, sourceStreamUrl?: string) => {
     setSelectedDisplayEpisode(episode);
     if (sourceStreamUrl) {
-      setSelectedSourceStreamUrl(sourceStreamUrl);
+      setSelectedSourceStreamUrl(sourceStreamUrl); // This is the original stream URL
     } else if (episode.sources.length > 0) {
-      setSelectedSourceStreamUrl(episode.sources[0].streamUrl); // Default to first source
+      setSelectedSourceStreamUrl(episode.sources[0].streamUrl); // Default to first source's original URL
     } else {
-      setSelectedSourceStreamUrl(null); // No sources for this episode
+      setSelectedSourceStreamUrl(null);
     }
   };
-  
+
   useEffect(() => {
     if (selectedSeason && groupedAndSortedEpisodes[parseInt(selectedSeason)]?.length > 0) {
       const firstEpisodeOfSeason = groupedAndSortedEpisodes[parseInt(selectedSeason)][0];
-      // Auto-play first episode of selected season IF no episode is currently selected OR if the selected episode is not in the current season
-      if (firstEpisodeOfSeason && (!selectedDisplayEpisode || selectedDisplayEpisode.seasonNumber !== parseInt(selectedSeason))) { 
+      if (firstEpisodeOfSeason && (!selectedDisplayEpisode || selectedDisplayEpisode.seasonNumber !== parseInt(selectedSeason))) {
          handleEpisodePlay(firstEpisodeOfSeason);
       }
     } else if (!selectedSeason && availableSeasons.length > 0) {
@@ -212,7 +217,7 @@ export default function SeriesPlayerPage() {
       </div>
     );
   }
-  
+
   if (!seriesInfo) {
       return (
           <div className="container mx-auto p-4 md:p-6 text-center">
@@ -225,7 +230,7 @@ export default function SeriesPlayerPage() {
   }
 
   const episodesInSelectedSeason = selectedSeason ? groupedAndSortedEpisodes[parseInt(selectedSeason)] || [] : [];
-  const currentEpisodeFullTitle = selectedDisplayEpisode && seriesInfo ? `${seriesInfo.title} - S${String(selectedDisplayEpisode.seasonNumber).padStart(2, '0')}E${String(selectedDisplayEpisode.episodeNumber).padStart(2, '0')} - ${selectedDisplayEpisode.title}` : seriesInfo.title;
+  const currentEpisodeFullTitle = selectedDisplayEpisode && seriesInfo ? `${seriesInfo.title} - S${String(selectedDisplayEpisode.seasonNumber).padStart(2, '0')}E${String(selectedDisplayEpisode.episodeNumber).padStart(2, '0')} - ${selectedDisplayEpisode.title}` : seriesInfo?.title;
 
   return (
     <div className="container mx-auto p-0 md:p-2 lg:p-4 space-y-4 md:space-y-6">
@@ -248,7 +253,7 @@ export default function SeriesPlayerPage() {
         </Button>
       </div>
 
-      <VideoPlayer src={selectedSourceStreamUrl} />
+      <VideoPlayer src={selectedSourceStreamUrl} title={currentEpisodeFullTitle} />
 
       <Tabs value={selectedSeason || (availableSeasons.length > 0 ? availableSeasons[0].toString() : undefined)} onValueChange={setSelectedSeason} className="w-full">
         <ScrollArea className="w-full whitespace-nowrap rounded-md border">
@@ -264,17 +269,17 @@ export default function SeriesPlayerPage() {
 
         {availableSeasons.map(seasonNum => (
           <TabsContent key={seasonNum} value={seasonNum.toString()} className="mt-0">
-            {selectedSeason === seasonNum.toString() && ( 
+            {selectedSeason === seasonNum.toString() && (
               <ScrollArea className="h-[300px] w-full rounded-md border p-1 md:p-2">
                 {episodesInSelectedSeason.length > 0 ? (
                   <ul className="space-y-1">
                     {episodesInSelectedSeason.map((ep) => (
-                      <li key={ep.id} 
+                      <li key={ep.id}
                           className={`p-2.5 rounded-md hover:bg-muted/50 transition-colors group ${selectedDisplayEpisode?.id === ep.id ? 'bg-primary/10 ring-1 ring-primary' : ''}`}>
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                             <div className="flex-1 min-w-0">
-                                <button 
-                                    onClick={() => handleEpisodePlay(ep)} 
+                                <button
+                                    onClick={() => handleEpisodePlay(ep)}
                                     disabled={ep.sources.length === 0}
                                     className={`text-sm font-medium text-left w-full disabled:opacity-50 hover:text-primary truncate block ${selectedDisplayEpisode?.id === ep.id ? 'text-primary' : ''}`}
                                     title={ep.title}
@@ -285,10 +290,10 @@ export default function SeriesPlayerPage() {
                                     <img src={ep.primaryLogoUrl} alt={`Thumbnail ${ep.title}`} className="h-10 w-auto rounded mt-1 opacity-70 group-hover:opacity-100 object-cover" onError={(e) => e.currentTarget.style.display = 'none'}/>
                                 )}
                             </div>
-                          
+
                           {ep.sources.length > 1 && (
-                            <Select 
-                                onValueChange={(streamUrl) => handleEpisodePlay(ep, streamUrl)}
+                            <Select
+                                onValueChange={(streamUrl) => handleEpisodePlay(ep, streamUrl)} // streamUrl here is the original URL
                                 defaultValue={selectedDisplayEpisode?.id === ep.id && selectedSourceStreamUrl ? selectedSourceStreamUrl : ep.sources[0].streamUrl}
                                 value={selectedDisplayEpisode?.id === ep.id ? selectedSourceStreamUrl || undefined : ep.sources[0].streamUrl}
                             >
@@ -308,10 +313,10 @@ export default function SeriesPlayerPage() {
                             </Select>
                           )}
                            {ep.sources.length === 1 && (
-                               <Button 
+                               <Button
                                     variant={selectedDisplayEpisode?.id === ep.id && selectedSourceStreamUrl === ep.sources[0].streamUrl ? "default" : "ghost"}
-                                    size="sm" 
-                                    onClick={() => handleEpisodePlay(ep, ep.sources[0].streamUrl)}
+                                    size="sm"
+                                    onClick={() => handleEpisodePlay(ep, ep.sources[0].streamUrl)} // pass original streamUrl
                                     className="w-full sm:w-auto text-xs h-9 mt-1 sm:mt-0"
                                 >
                                     <Tv className="mr-2 h-3 w-3"/> Assistir ({ep.sources[0].playlistName})
@@ -337,6 +342,10 @@ export default function SeriesPlayerPage() {
        {allRawEpisodes.length === 0 && !isLoading && (
             <p className="text-muted-foreground text-center py-8">Nenhum episódio encontrado para esta série nas suas playlists.</p>
         )}
+      <div className="text-xs text-muted-foreground p-2 break-all">
+        URL Atual para Player: {selectedSourceStreamUrl || "Nenhuma"}
+      </div>
     </div>
   );
 }
+
