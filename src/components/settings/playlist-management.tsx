@@ -15,7 +15,7 @@ import {
   type PlaylistSourceDetailsUrl,
   type PlaylistSourceDetailsXtream,
 } from '@/lib/constants';
-import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard, Users } from 'lucide-react'; // Added Users for episodes
+import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard, Users } from 'lucide-react'; 
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +41,7 @@ import {
   updatePlaylistMetadata, 
   deletePlaylistAndItems,
   clearAllAppData,
+  getPlaylistMetadata,
 } from '@/lib/db'; 
 
 export function PlaylistManagement() {
@@ -123,7 +124,7 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); 
+        await updatePlaylistMetadata(metadataBase); // Save initial metadata
         
         const fileContent = await newPlaylistFile.text();
         itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
@@ -141,9 +142,8 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); 
+        await updatePlaylistMetadata(metadataBase); // Save initial metadata
 
-        // TODO: Consider using a CORS proxy API route if direct fetch fails often
         const response = await fetch(url); 
         if (!response.ok) {
           throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
@@ -167,18 +167,19 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); 
-
-        // fetchXtreamPlaylistItems needs to be updated to return PlaylistItem[] matching the new structure
-        // This assumes fetchXtreamPlaylistItems is adapted to the new PlaylistItem structure from parser
+        await updatePlaylistMetadata(metadataBase); // Save initial metadata
+        
+        // fetchXtreamPlaylistItems now returns PlaylistItem[] directly
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
+      // Now add items and update final metadata in one go using the DB function
+      // addPlaylistWithItems handles calculating counts and setting final status
       await addPlaylistWithItems(metadataBase, itemsToAdd); 
       
       toast({
         title: `Playlist Adicionada (${type.toUpperCase()})`,
-        description: `"${nameToAdd}" foi processada com ${itemsToAdd.length} itens brutos.`,
+        description: `"${nameToAdd}" foi processada. Verifique as contagens de itens abaixo.`,
       });
 
       await fetchPlaylists(); 
@@ -191,7 +192,8 @@ export function PlaylistManagement() {
         const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
             status: 'failed' as 'failed', 
-            statusMessage: error.message
+            statusMessage: error.message,
+            lastUpdatedAt: Date.now(),
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
 
@@ -205,6 +207,7 @@ export function PlaylistManagement() {
             variant: "destructive",
             duration: 7000 
         });
+        await fetchPlaylists(); // Refresh list to show failed status
     } finally {
         setIsLoading(false);
     }
@@ -544,4 +547,3 @@ export function PlaylistManagement() {
     </Card>
   );
 }
-```
