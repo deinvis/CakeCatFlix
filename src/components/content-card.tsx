@@ -7,68 +7,70 @@ import type { ContentItemForCard } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
 import { Tv2, Film, Clapperboard, Server } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 interface ContentCardProps extends ContentItemForCard {}
 
-export function ContentCard({ 
-  id, 
-  title, 
-  imageUrl, 
-  type, 
-  genre, 
-  dataAiHint, 
-  // streamUrl, // Not directly used for navigation decision now
+export function ContentCard({
+  id,
+  title,
+  imageUrl,
+  type,
+  genre,
+  dataAiHint,
   qualities,
   sourceCount,
-  seriesId 
+  seriesId,
+  year
 }: ContentCardProps) {
-  
   const router = useRouter();
-  const imageSrc = imageUrl || `https://placehold.co/300x450.png`;
-  const finalDataAiHint = dataAiHint || `${type} ${title}`.substring(0,50).toLowerCase();
+  const [imageError, setImageError] = useState(false);
+
+  const defaultPlaceholder = `https://placehold.co/300x450.png`;
+  // Use a placeholder if imageUrl is initially missing or if an error occurs
+  const imageSrc = imageError ? defaultPlaceholder : (imageUrl || defaultPlaceholder);
+  const finalDataAiHint = dataAiHint || `${type} ${title}`.substring(0, 50).toLowerCase();
 
   const handleClick = () => {
     if (type === 'movie') {
-      // ID for movie is its DB ID, which should be a number, but router expects string
-      router.push(`/app/player/movie/${id.toString()}`); 
+      router.push(`/app/player/movie/${id.toString()}`);
     } else if (type === 'series') {
-      // For series, 'id' from ContentItemForCard should be the SeriesItem.id from DB (which is a number)
-      // 'seriesId' prop on ContentItemForCard is this SeriesItem.id
-      const navigationId = seriesId || id; // Prefer seriesId if explicitly passed
+      const navigationId = seriesId || id;
       router.push(`/app/player/series/${navigationId.toString()}`);
     } else if (type === 'channel') {
-      // For an aggregated channel, 'id' is the baseChannelName (string)
-      router.push(`/app/player/channel/${encodeURIComponent(id)}`); 
+      router.push(`/app/player/channel/${encodeURIComponent(id)}`);
     } else {
       console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined.`);
-      // alert(`Details for: ${title}\n(Player/Detail page not implemented for this type or missing URL)`);
     }
   };
 
   const TypeIcon = type === 'movie' ? Film : type === 'series' ? Clapperboard : Tv2;
 
   return (
-    <div 
+    <div
       className="group block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-lg cursor-pointer"
       onClick={handleClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick();}}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       aria-label={`Play or view details for ${title}`}
     >
       <Card className="overflow-hidden transition-all duration-300 ease-in-out group-hover:shadow-2xl group-hover:scale-105 group-focus:scale-105 group-focus:shadow-2xl bg-card border-border hover:border-primary/50 focus:border-primary/50 flex flex-col h-full">
         <CardContent className="p-0 flex-grow flex flex-col">
           <div className="aspect-[2/3] relative w-full bg-muted overflow-hidden">
-            <Image 
-              src={imageSrc} 
-              alt={title} 
+            <Image
+              src={imageSrc}
+              alt={title}
               fill
               sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
-              className="object-cover transition-transform duration-300 ease-in-out group-hover:scale-110 group-focus:scale-110" 
+              className="object-cover transition-transform duration-300 ease-in-out group-hover:scale-110 group-focus:scale-110"
               data-ai-hint={finalDataAiHint}
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `https://placehold.co/300x450.png`;
+              onError={() => {
+                if (!imageError) { // Prevent infinite loop if placeholder also fails (though unlikely for placehold.co)
+                  setImageError(true);
+                }
               }}
+              unoptimized={imageError} // If using placeholder, no need to optimize it further
             />
             <Badge variant="default" className="absolute top-2 left-2 text-xs shadow-md">
               <TypeIcon className="h-3 w-3 mr-1" />
@@ -83,6 +85,11 @@ export function ContentCard({
               {genre && (
                 <Badge variant="secondary" className="text-xs">
                   {genre}
+                </Badge>
+              )}
+               {year && (type === 'movie' || type === 'series') && (
+                <Badge variant="outline" className="text-xs">
+                  {year}
                 </Badge>
               )}
               {type === 'channel' && sourceCount && sourceCount > 1 && (
