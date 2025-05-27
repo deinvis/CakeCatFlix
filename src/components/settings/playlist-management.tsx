@@ -8,7 +8,7 @@ import {
   LOCALSTORAGE_STARTUP_PAGE_KEY, 
   LOCALSTORAGE_THEME_KEY, 
   LOCALSTORAGE_PARENTAL_CONTROL_KEY,
-  FILE_PLAYLIST_ITEM_LIMIT
+  FILE_PLAYLIST_ITEM_LIMIT // This limit will also be applied by xtream-parser internally
 } from '@/lib/constants';
 import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard } from 'lucide-react';
 import {
@@ -29,13 +29,15 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from '@/components/ui/separator';
 import { parseM3U } from '@/lib/m3u-parser';
+import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; // Import the new parser
 import { 
   addPlaylistWithItems, 
   getAllPlaylistsMetadata, 
   updatePlaylistMetadata, 
   deletePlaylistAndItems,
   clearAllAppData,
-  type PlaylistMetadata 
+  type PlaylistMetadata,
+  type PlaylistItemCore
 } from '@/lib/db';
 
 export function PlaylistManagement() {
@@ -54,12 +56,15 @@ export function PlaylistManagement() {
   const [editPlaylistName, setEditPlaylistName] = useState('');
   const [showClearDataDialog, setShowClearDataDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Processando sua solicitação...');
+
 
   const { toast } = useToast();
 
   const fetchPlaylists = async () => {
     try {
       setIsLoading(true);
+      setLoadingMessage('Carregando playlists...');
       const storedPlaylists = await getAllPlaylistsMetadata();
       setPlaylists(storedPlaylists.sort((a, b) => a.createdAt - b.createdAt));
     } catch (error) {
@@ -79,7 +84,6 @@ export function PlaylistManagement() {
   const resetAddPlaylistForms = () => {
     setNewPlaylistName('');
     setNewPlaylistFile(null);
-    // Clear file input visually
     const fileInput = document.getElementById('playlist-file') as HTMLInputElement;
     if (fileInput) fileInput.value = '';
     
@@ -92,8 +96,9 @@ export function PlaylistManagement() {
   const handleAddNewPlaylist = async (type: 'file' | 'url' | 'xtream') => {
     setIsLoading(true);
     let nameToAdd = newPlaylistName.trim();
-    let playlistId = Date.now().toString();
+    let playlistId = Date.now().toString(); // Unique ID for the playlist
     let sourceValue = '';
+    let itemsToAdd: PlaylistItemCore[] = [];
     
     const metadataBase: Omit<PlaylistMetadata, 'sourceValue' | 'itemCount' | 'channelCount' | 'movieCount' | 'seriesCount'> = {
       id: playlistId,
@@ -102,77 +107,88 @@ export function PlaylistManagement() {
       createdAt: Date.now(),
     };
 
-    if (type === 'file') {
-      if (!newPlaylistFile) {
-        toast({ title: "Erro", description: "Selecione um arquivo M3U/M3U8.", variant: "destructive" });
-        setIsLoading(false);
-        return;
-      }
-      nameToAdd = nameToAdd || newPlaylistFile.name;
-      sourceValue = newPlaylistFile.name;
-      metadataBase.name = nameToAdd;
-      
-      try {
+    try {
+      if (type === 'file') {
+        setLoadingMessage('Processando arquivo M3U...');
+        if (!newPlaylistFile) {
+          toast({ title: "Erro", description: "Selecione um arquivo M3U/M3U8.", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+        nameToAdd = nameToAdd || newPlaylistFile.name;
+        sourceValue = newPlaylistFile.name; // Store filename as sourceValue
+        metadataBase.name = nameToAdd;
+        
         const fileContent = await newPlaylistFile.text();
-        const parsedItems = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
-        await addPlaylistWithItems({ ...metadataBase, sourceValue }, parsedItems);
+        itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
+        
+        await addPlaylistWithItems({ ...metadataBase, sourceValue }, itemsToAdd);
         toast({
           title: "Playlist Adicionada",
-          description: `"${nameToAdd}" (${type}) foi adicionada com ${parsedItems.length} itens.`,
+          description: `"${nameToAdd}" (${type}) foi adicionada com ${itemsToAdd.length} itens.`,
         });
-      } catch (error) {
-        console.error("Error processing file playlist:", error);
-        toast({ title: "Erro ao Processar Arquivo", description: (error as Error).message, variant: "destructive" });
-        setIsLoading(false);
-        return;
+
+      } else if (type === 'url') {
+        setLoadingMessage('Adicionando playlist de URL...');
+        if (!newPlaylistUrl) {
+          toast({ title: "Erro", description: "Insira a URL da playlist.", variant: "destructive" });
+          setIsLoading(false);
+          return;
+        }
+        nameToAdd = nameToAdd || `URL Playlist ${new Date().toLocaleTimeString()}`;
+        sourceValue = newPlaylistUrl; // Store URL as sourceValue
+        metadataBase.name = nameToAdd;
+        // TODO: Fetch and parse URL content. For now, adds 0 items.
+        itemsToAdd = []; 
+        await addPlaylistWithItems({ ...metadataBase, sourceValue }, itemsToAdd);
+        toast({
+          title: "Playlist Adicionada (URL)",
+          description: `"${nameToAdd}" foi adicionada. O processamento do conteúdo da URL não está totalmente implementado neste protótipo.`,
+        });
+
+      } else if (type === 'xtream') {
+        setLoadingMessage('Conectando e buscando itens do Xtream Codes...');
+        if (!xtreamHost || !xtreamUser || !xtreamPassword) {
+           toast({ title: "Erro", description: "Preencha todos os campos do Xtream Codes.", variant: "destructive" });
+           setIsLoading(false);
+          return;
+        }
+        const hostDomain = xtreamHost.split('//')[1]?.split(':')[0] || xtreamHost.split(':')[0] || 'Xtream Source';
+        nameToAdd = nameToAdd || `Xtream: ${hostDomain}`;
+        sourceValue = xtreamHost; // Store host as sourceValue
+        metadataBase.name = nameToAdd;
+        metadataBase.xtreamUsername = xtreamUser;
+        metadataBase.xtreamPassword = xtreamPassword; // Storing for potential future re-fetch logic, BEWARE OF SECURITY
+        
+        itemsToAdd = await fetchXtreamPlaylistItems(playlistId, xtreamHost, xtreamUser, xtreamPassword);
+        
+        await addPlaylistWithItems({ 
+          ...metadataBase, 
+          sourceValue, 
+          xtreamUsername: xtreamUser, // Ensure these are passed
+          xtreamPassword: xtreamPassword 
+        }, itemsToAdd);
+
+        toast({
+          title: "Playlist Xtream Adicionada",
+          description: `"${nameToAdd}" foi adicionada com ${itemsToAdd.length} itens.`,
+        });
       }
 
-    } else if (type === 'url') {
-      if (!newPlaylistUrl) {
-        toast({ title: "Erro", description: "Insira a URL da playlist.", variant: "destructive" });
+      await fetchPlaylists(); // Refresh list
+      resetAddPlaylistForms();
+      // Dialog will be closed by DialogClose if successful
+    } catch (error: any) {
+        console.error(`Error adding ${type} playlist:`, error);
+        toast({ 
+            title: `Erro ao Adicionar Playlist ${type.toUpperCase()}`, 
+            description: error.message || "Ocorreu um erro desconhecido.", 
+            variant: "destructive",
+            duration: 7000 
+        });
+    } finally {
         setIsLoading(false);
-        return;
-      }
-      nameToAdd = nameToAdd || `URL Playlist ${new Date().toLocaleTimeString()}`;
-      sourceValue = newPlaylistUrl;
-      metadataBase.name = nameToAdd;
-      // TODO: Fetch and parse URL content
-      // For now, just add metadata, items would be fetched/parsed on demand or via a background process.
-      // This is a placeholder for actual URL fetching and parsing.
-      await addPlaylistWithItems({ ...metadataBase, sourceValue }, []);
-      toast({
-        title: "Playlist Adicionada (URL)",
-        description: `"${nameToAdd}" foi adicionada. O processamento do conteúdo da URL não está implementado neste protótipo.`,
-      });
-
-    } else if (type === 'xtream') {
-      if (!xtreamHost || !xtreamUser || !xtreamPassword) {
-         toast({ title: "Erro", description: "Preencha todos os campos do Xtream Codes.", variant: "destructive" });
-         setIsLoading(false);
-        return;
-      }
-      const hostDomain = xtreamHost.split('//')[1]?.split(':')[0] || xtreamHost;
-      nameToAdd = nameToAdd || `Xtream: ${hostDomain}`;
-      sourceValue = xtreamHost;
-      metadataBase.name = nameToAdd;
-       // TODO: Implement Xtream API interaction
-      // For now, just add metadata.
-      await addPlaylistWithItems({ 
-        ...metadataBase, 
-        sourceValue, 
-        xtreamUsername: xtreamUser,
-        xtreamPassword: xtreamPassword 
-      }, []);
-      toast({
-        title: "Playlist Adicionada (Xtream)",
-        description: `"${nameToAdd}" foi adicionada. A integração com Xtream API não está implementada neste protótipo.`,
-      });
     }
-
-    await fetchPlaylists(); // Refresh list
-    resetAddPlaylistForms();
-    setIsLoading(false);
-    // Dialog will be closed by DialogClose
   };
 
 
@@ -183,6 +199,7 @@ export function PlaylistManagement() {
   const confirmDeletePlaylist = async () => {
     if (playlistToDelete) {
       setIsLoading(true);
+      setLoadingMessage('Apagando playlist...');
       try {
         await deletePlaylistAndItems(playlistToDelete.id);
         toast({
@@ -190,10 +207,10 @@ export function PlaylistManagement() {
           description: `"${playlistToDelete.name}" foi removida.`,
         });
         setPlaylistToDelete(null);
-        await fetchPlaylists(); // Refresh list
-      } catch (error) {
+        await fetchPlaylists(); 
+      } catch (error: any) {
         console.error("Error deleting playlist:", error);
-        toast({ title: "Erro ao Apagar", description: (error as Error).message, variant: "destructive" });
+        toast({ title: "Erro ao Apagar", description: error.message, variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
@@ -208,27 +225,22 @@ export function PlaylistManagement() {
   const handleSaveEditPlaylist = async () => {
     if (editingPlaylist && editPlaylistName.trim()) {
       setIsLoading(true);
+      setLoadingMessage('Atualizando playlist...');
       try {
-        // Preserve existing counts if not re-evaluating items
-        const updatedPlaylist = { 
+        const updatedPlaylistData = { 
             ...editingPlaylist, 
             name: editPlaylistName.trim(),
-            // Ensure counts are preserved during simple name edit
-            itemCount: editingPlaylist.itemCount,
-            channelCount: editingPlaylist.channelCount,
-            movieCount: editingPlaylist.movieCount,
-            seriesCount: editingPlaylist.seriesCount,
         };
-        await updatePlaylistMetadata(updatedPlaylist);
+        await updatePlaylistMetadata(updatedPlaylistData); // updatePlaylistMetadata should preserve counts
         toast({
           title: "Playlist Atualizada",
-          description: `"${updatedPlaylist.name}" foi atualizada.`,
+          description: `"${updatedPlaylistData.name}" foi atualizada.`,
         });
         setEditingPlaylist(null); 
-        await fetchPlaylists(); // Refresh list
-      } catch (error) {
+        await fetchPlaylists(); 
+      } catch (error: any) {
         console.error("Error updating playlist:", error);
-        toast({ title: "Erro ao Atualizar", description: (error as Error).message, variant: "destructive" });
+        toast({ title: "Erro ao Atualizar", description: error.message, variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
@@ -239,9 +251,9 @@ export function PlaylistManagement() {
 
   const handleClearAllData = async () => {
     setIsLoading(true);
+    setLoadingMessage('Limpando todos os dados...');
     try {
       await clearAllAppData();
-      // Also clear relevant localStorage if any other settings are stored there
       const appStorageKeys = [
         LOCALSTORAGE_STARTUP_PAGE_KEY,
         LOCALSTORAGE_THEME_KEY,
@@ -257,16 +269,15 @@ export function PlaylistManagement() {
         duration: 5000,
       });
       setShowClearDataDialog(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error clearing all data:", error);
-      toast({ title: "Erro ao Limpar Dados", description: (error as Error).message, variant: "destructive" });
+      toast({ title: "Erro ao Limpar Dados", description: error.message, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
   
-
-  if (!isMounted || (isLoading && !playlists.length)) { // Show full loader if initial load and no playlists yet
+  if (!isMounted || (isLoading && !playlists.length && loadingMessage === 'Carregando playlists...')) {
     return (
       <Card className="shadow-lg border-border">
         <CardHeader>
@@ -287,7 +298,7 @@ export function PlaylistManagement() {
         <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador.</CardDescription>
       </CardHeader>
       <CardContent>
-        <Dialog onOpenChange={(open) => { if(!open) resetAddPlaylistForms(); }}>
+        <Dialog onOpenChange={(open) => { if(!open && !isLoading) resetAddPlaylistForms(); }}>
           <DialogTrigger asChild>
             <Button className="mb-6 bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isLoading}>
               <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Nova Playlist
@@ -299,9 +310,9 @@ export function PlaylistManagement() {
             </DialogHeader>
             <Tabs defaultValue="file" className="w-full">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="file"><UploadCloud className="mr-1 h-4 w-4 inline-block"/> Arquivo</TabsTrigger>
-                <TabsTrigger value="url"><Link2 className="mr-1 h-4 w-4 inline-block"/> URL</TabsTrigger>
-                <TabsTrigger value="xtream"><ListVideo className="mr-1 h-4 w-4 inline-block"/> Xtream</TabsTrigger>
+                <TabsTrigger value="file" disabled={isLoading}><UploadCloud className="mr-1 h-4 w-4 inline-block"/> Arquivo</TabsTrigger>
+                <TabsTrigger value="url" disabled={isLoading}><Link2 className="mr-1 h-4 w-4 inline-block"/> URL</TabsTrigger>
+                <TabsTrigger value="xtream" disabled={isLoading}><ListVideo className="mr-1 h-4 w-4 inline-block"/> Xtream</TabsTrigger>
               </TabsList>
               <div className="grid gap-4 py-4">
                 <Label htmlFor="new-playlist-name">Nome da Playlist (Opcional)</Label>
@@ -327,9 +338,8 @@ export function PlaylistManagement() {
                 </div>
                 <DialogFooter>
                   <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                  <DialogClose asChild>
-                    <Button type="button" onClick={() => handleAddNewPlaylist('file')} disabled={isLoading || !newPlaylistFile}>Adicionar do Arquivo</Button>
-                  </DialogClose>
+                  {/* DialogClose needs to be conditional or outside if we want to keep dialog open on error */}
+                  <Button type="button" onClick={() => handleAddNewPlaylist('file')} disabled={isLoading || !newPlaylistFile}>Adicionar do Arquivo</Button>
                 </DialogFooter>
               </TabsContent>
               <TabsContent value="url">
@@ -347,15 +357,13 @@ export function PlaylistManagement() {
                 </div>
                  <DialogFooter>
                   <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                  <DialogClose asChild>
-                    <Button type="button" onClick={() => handleAddNewPlaylist('url')} disabled={isLoading || !newPlaylistUrl.trim()}>Adicionar da URL</Button>
-                  </DialogClose>
+                  <Button type="button" onClick={() => handleAddNewPlaylist('url')} disabled={isLoading || !newPlaylistUrl.trim()}>Adicionar da URL</Button>
                 </DialogFooter>
               </TabsContent>
               <TabsContent value="xtream">
                 <div className="space-y-4 py-4">
                   <div>
-                    <Label htmlFor="xtream-host">Host (com porta)</Label>
+                    <Label htmlFor="xtream-host">Host (Ex: http://servidor.com:porta)</Label>
                     <Input id="xtream-host" value={xtreamHost} onChange={e => setXtreamHost(e.target.value)} placeholder="http://servidor.xtream:porta" disabled={isLoading} />
                   </div>
                   <div>
@@ -366,13 +374,11 @@ export function PlaylistManagement() {
                     <Label htmlFor="xtream-pass">Senha</Label>
                     <Input id="xtream-pass" type="password" value={xtreamPassword} onChange={e => setXtreamPassword(e.target.value)} placeholder="sua_senha" disabled={isLoading} />
                   </div>
-                   <p className="text-xs text-muted-foreground">A integração com Xtream API não está totalmente implementada.</p>
+                   <p className="text-xs text-muted-foreground">Busca canais, filmes e séries. Limite de {FILE_PLAYLIST_ITEM_LIMIT} itens no total.</p>
                 </div>
                 <DialogFooter>
                   <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                  <DialogClose asChild>
-                    <Button type="button" onClick={() => handleAddNewPlaylist('xtream')} disabled={isLoading || !xtreamHost.trim() || !xtreamUser.trim() || !xtreamPassword.trim()}>Adicionar Xtream</Button>
-                  </DialogClose>
+                  <Button type="button" onClick={() => handleAddNewPlaylist('xtream')} disabled={isLoading || !xtreamHost.trim() || !xtreamUser.trim() || !xtreamPassword.trim()}>Adicionar Xtream</Button>
                 </DialogFooter>
               </TabsContent>
             </Tabs>
@@ -385,7 +391,7 @@ export function PlaylistManagement() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <p className="text-sm">Processando sua solicitação...</p>
+            <p className="text-sm">{loadingMessage}</p>
           </div>
         )}
 
@@ -400,20 +406,20 @@ export function PlaylistManagement() {
                     <div className="flex-1 mb-2 sm:mb-0 mr-2">
                       <span className="font-medium text-foreground truncate block" title={playlist.name}>
                         {playlist.name}
-                        <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType})</span>
+                        <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType}{playlist.sourceType === 'xtream' && playlist.xtreamUsername ? ` - ${playlist.xtreamUsername}` : ''})</span>
                       </span>
-                      <div className="text-xs text-muted-foreground flex items-center space-x-2 mt-1">
+                      <div className="text-xs text-muted-foreground flex items-center flex-wrap gap-x-2 gap-y-1 mt-1">
                         <span>Total: {playlist.itemCount ?? 0}</span>
-                        <Separator orientation="vertical" className="h-3 bg-border"/>
-                        <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1"/> {playlist.channelCount ?? 0}</span>
-                        <Separator orientation="vertical" className="h-3 bg-border"/>
-                        <span className="flex items-center"><Film className="h-3 w-3 mr-1"/> {playlist.movieCount ?? 0}</span>
-                        <Separator orientation="vertical" className="h-3 bg-border"/>
-                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1"/> {playlist.seriesCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
+                        <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1 text-sky-500"/> {playlist.channelCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
+                        <span className="flex items-center"><Film className="h-3 w-3 mr-1 text-orange-500"/> {playlist.movieCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
+                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesCount ?? 0}</span>
                       </div>
                     </div>
                     <div className="space-x-1 flex-shrink-0">
-                      <Dialog onOpenChange={(open) => { if(!open) setEditingPlaylist(null); }}>
+                      <Dialog onOpenChange={(open) => { if(!open && !isLoading) setEditingPlaylist(null); }}>
                         <DialogTrigger asChild>
                           <Button variant="ghost" size="icon" onClick={() => openEditDialog(playlist)} aria-label={`Editar ${playlist.name}`} disabled={isLoading}>
                             <Edit className="h-4 w-4" />
@@ -511,4 +517,3 @@ export function PlaylistManagement() {
     </Card>
   );
 }
-
