@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface VideoPlayerProps {
-  src: string | null; // Changed from videoSrc to src, and can be null
+  src: string | null; // Renamed from originalSrc for consistency with HTML, can be null
   title?: string;
 }
 
@@ -25,16 +25,15 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showControls, setShowControls] = useState(true); // Start with controls visible
+  const [showControls, setShowControls] = useState(true);
   const [bufferProgress, setBufferProgress] = useState(0);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-
   let controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Use a proxy for the video source if originalSrc is provided
-  const proxiedSrc = originalSrc ? `/api/proxy?targetUrl=${encodeURIComponent(originalSrc)}` : null;
+  // THIS IS THE CORRECTED PART: We will use originalSrc directly
+  // const proxiedSrc = originalSrc ? `/api/proxy?targetUrl=${encodeURIComponent(originalSrc)}` : null; // REMOVED
 
   const formatTime = (timeInSeconds: number): string => {
     if (isNaN(timeInSeconds) || timeInSeconds === Infinity || timeInSeconds < 0) {
@@ -51,168 +50,187 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
   };
 
   const hideControls = useCallback(() => {
-    if (isPlaying && !playerError) { 
+    if (isPlaying && !playerError && !isLoading) {
       setShowControls(false);
     }
-  }, [isPlaying, playerError]);
+  }, [isPlaying, playerError, isLoading]);
 
   const showAndAutoHideControls = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    // Only auto-hide if playing
-    if (isPlaying) {
+    if (isPlaying && !isLoading) {
         controlsTimeoutRef.current = setTimeout(hideControls, 3000);
     }
-  }, [hideControls, isPlaying]);
+  }, [hideControls, isPlaying, isLoading]);
 
-  const handleMainClick = useCallback(() => {
-    if (videoRef.current) {
-      if (videoRef.current.paused || videoRef.current.ended) {
-        videoRef.current.play().catch(err => {
-          console.error("Error on manual play from main click:", err);
-          setPlayerError(`Não foi possível iniciar a reprodução: ${err.message}`);
-          setIsLoading(false);
-        });
-      } else {
-        videoRef.current.pause();
+  const handleError = useCallback(async (videoElement: HTMLVideoElement, sourceUrlForError: string | null) => {
+      let message = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
+      let errorCode: number | string = "N/A";
+      let errorMessageFromVideoElement: string | undefined = undefined;
+
+      if (videoElement.error) {
+        const error = videoElement.error;
+        errorCode = error.code;
+        errorMessageFromVideoElement = error.message;
+
+        switch (error.code) {
+          case MediaError.MEDIA_ERR_ABORTED: message = "A reprodução foi abortada."; break;
+          case MediaError.MEDIA_ERR_NETWORK: message = "Erro de rede ao carregar o vídeo. Verifique a conexão."; break;
+          case MediaError.MEDIA_ERR_DECODE: message = "Erro ao decodificar o vídeo. O arquivo pode estar corrompido ou em formato não suportado."; break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            message = `Formato de vídeo não suportado ou fonte inválida.`;
+            if (sourceUrlForError && sourceUrlForError.toLowerCase().endsWith('.mp4')) {
+                message += " Para MP4, isso pode ser devido a restrições de CORS no servidor ou o arquivo não está acessível. Verifique o console do navegador.";
+            }
+            // Attempt to fetch headers from the original source to see if it returns an error
+            // This might still be blocked by CORS itself for the HEAD request, but worth a try for diagnostics
+            if (sourceUrlForError) {
+                try {
+                    const headResponse = await fetch(sourceUrlForError, { method: 'HEAD', mode: 'cors' });
+                    if (!headResponse.ok) {
+                        message += ` (O servidor da fonte original respondeu com erro: ${headResponse.status} ${headResponse.statusText}).`;
+                    }
+                } catch (fetchError: any) {
+                    // console.warn("VideoPlayer: Error fetching HEAD from source during error handling:", fetchError);
+                    message += ` (Tentativa de verificar a fonte original também falhou: ${fetchError.message}).`;
+                }
+            }
+            break;
+          default: message = `Erro desconhecido no vídeo (Código: ${error.code || 'N/A'}).`;
+        }
+      } else if (!sourceUrlForError) {
+          message = "Nenhuma fonte de vídeo fornecida."
       }
-      // setIsPlaying(!isPlaying); // State updated by play/pause events
-    }
+
+      console.error("Video Player Error (Debug Info):", {
+        errorDetails: videoElement.error, // The MediaError object
+        errorCode: errorCode,
+        errorMessageFromVideoElement: errorMessageFromVideoElement,
+        sourceUrl: sourceUrlForError,
+        // proxiedUrlUsed: "N/A since proxy is removed from player"
+      });
+      setPlayerError(message);
+      setIsLoading(false);
+      setIsPlaying(false);
+      setShowControls(true);
   }, []);
 
 
   useEffect(() => {
     const video = videoRef.current;
-    // Early exit if no video element or no valid source
-    if (!video || !proxiedSrc) {
-      setIsLoading(false);
-      setPlayerError(originalSrc === null ? null : "Nenhuma fonte de vídeo válida fornecida.");
-      // Reset states if src becomes null
-      if (!proxiedSrc) {
-          setIsPlaying(false);
-          setProgress(0);
-          setCurrentTime(0);
-          setDuration(0);
-          setBufferProgress(0);
-      }
-      return;
-    }
+    // Use originalSrc directly, which is the `src` prop
+    const srcToLoad = originalSrc;
 
-    console.log("VideoPlayer: Setting up for new proxiedSrc:", proxiedSrc, "Original Src:", originalSrc);
-    setIsLoading(true);
-    setPlayerError(null);
+    console.log("VideoPlayer: useEffect triggered. srcToLoad:", srcToLoad, "Current video src:", video?.src);
+
+
+    if (!video) return;
+
+    // Reset states when srcToLoad changes or becomes null
+    setIsPlaying(false);
     setProgress(0);
     setCurrentTime(0);
     setDuration(0);
     setBufferProgress(0);
-    setIsPlaying(false); // Assume not playing until 'play' event
+    setPlayerError(null);
+    setShowControls(true); // Show controls when src changes
+
+    if (!srcToLoad) {
+      console.log("VideoPlayer: srcToLoad is null or empty, clearing video source.");
+      video.removeAttribute('src');
+      try { video.load(); } catch(e) { /* ignore */ }
+      setIsLoading(false);
+      return;
+    }
+
+    console.log("VideoPlayer: Setting up for new src:", srcToLoad);
+    setIsLoading(true);
+
 
     const updateVideoProgress = () => {
-      if (video.duration > 0) {
+      if (video.duration > 0 && !video.seeking) {
         setProgress((video.currentTime / video.duration) * 100);
         if (video.buffered.length > 0) {
-          const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-          setBufferProgress((bufferedEnd / video.duration) * 100);
+          try {
+            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+            setBufferProgress((bufferedEnd / video.duration) * 100);
+          } catch (e) {
+             // console.warn("Error accessing video.buffered.end:", e);
+             setBufferProgress(0); // Reset if error
+          }
+        } else {
+            setBufferProgress(0);
         }
       }
       setCurrentTime(video.currentTime);
     };
+
     const setVideoDuration = () => {
         if (isFinite(video.duration)) {
             setDuration(video.duration);
-            setIsLoading(false); // Metadata loaded, not "loading" in the sense of waiting for src
+            // Don't set isLoading false here yet, wait for 'canplay' or 'playing'
         } else {
             // Duration might be Infinity for live streams, or NaN if not loaded
-            console.warn("VideoPlayer: Duration is not finite:", video.duration);
             // Keep isLoading true or handle as live stream if needed
         }
     };
-    const onPlay = () => { setIsPlaying(true); setIsLoading(false); setPlayerError(null); showAndAutoHideControls(); };
-    const onPause = () => { setIsPlaying(false); setShowControls(true); if(controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current); };
-    const onVolumeChange = () => { 
-      setVolume(video.volume); 
+    const onPlay = () => { console.log("VideoPlayer: Event 'play'"); setIsLoading(false); setIsPlaying(true); setPlayerError(null); showAndAutoHideControls(); };
+    const onPause = () => { console.log("VideoPlayer: Event 'pause'"); setIsPlaying(false); setShowControls(true); if(controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current); };
+    const onPlaying = () => { console.log("VideoPlayer: Event 'playing'"); setIsLoading(false); setIsPlaying(true); setPlayerError(null); };
+    const onVolumeChange = () => {
+      setVolume(video.volume);
       setIsMuted(video.muted);
     };
-    const onEnded = () => { setIsPlaying(false); setShowControls(true); setProgress(100); };
-    const onWaiting = () => { if(!playerError) setIsLoading(true); };
-    const onCanPlay = () => setIsLoading(false);
-    const onPlaying = () => { setIsLoading(false); setIsPlaying(true); setPlayerError(null);};
+    const onEnded = () => { console.log("VideoPlayer: Event 'ended'"); setIsPlaying(false); setShowControls(true); setProgress(100); };
+    const onWaiting = () => { console.log("VideoPlayer: Event 'waiting'"); if(!playerError) setIsLoading(true); };
+    const onCanPlay = () => { console.log("VideoPlayer: Event 'canplay'"); setIsLoading(false); if (video.paused && !playerError && !isPlaying) { /* consider auto-play logic if desired */ }};
+    const onErrorEvent = () => handleError(video, srcToLoad);
 
-    const onError = () => {
-      setIsLoading(false);
-      setIsPlaying(false);
-      let message = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
-      if (video.error) {
-        const error = video.error;
-        console.error("VideoPlayer Error (HTML5 Video Element):", { 
-            errorDetails: error, 
-            errorCode: error.code,
-            errorMessageFromVideoElement: error.message,
-            originalSourceUrl: originalSrc,
-            proxiedUrlUsed: proxiedSrc
-        });
-
-        switch (error.code) {
-          case MediaError.MEDIA_ERR_ABORTED: message = "A reprodução foi abortada."; break;
-          case MediaError.MEDIA_ERR_NETWORK: message = "Erro de rede ao carregar o vídeo. Verifique a conexão ou se o proxy conseguiu acessar a fonte."; break;
-          case MediaError.MEDIA_ERR_DECODE: message = "Erro ao decodificar o vídeo. O arquivo pode estar corrompido ou em formato não suportado."; break;
-          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            message = `Formato de vídeo não suportado ou fonte inválida (${originalSrc}). Verifique o console do navegador.`;
-            // Attempt to fetch headers from proxy to see if the original source itself returned an error
-            if (proxiedSrc) {
-              fetch(proxiedSrc, { method: 'HEAD' })
-                .then(res => {
-                  if (!res.ok) {
-                    setPlayerError(`A fonte original (${originalSrc}) pode estar inacessível ou retornou um erro (Status: ${res.status} ${res.statusText}) ao ser acessada pelo proxy.`);
-                  }
-                }).catch(e => console.warn("Error fetching HEAD from proxy during error handling:", e));
-            }
-            break;
-          default: message = `Erro desconhecido no vídeo (Código: ${error.code || 'N/A'}).`;
-        }
-      } else if (!proxiedSrc) {
-          message = "Nenhuma fonte de vídeo válida.";
-      }
-      setPlayerError(message);
-    };
 
     video.addEventListener('timeupdate', updateVideoProgress);
     video.addEventListener('loadedmetadata', setVideoDuration);
-    video.addEventListener('durationchange', setVideoDuration); // Also listen for durationchange
+    video.addEventListener('durationchange', setVideoDuration);
     video.addEventListener('play', onPlay);
+    video.addEventListener('playing', onPlaying);
     video.addEventListener('pause', onPause);
     video.addEventListener('volumechange', onVolumeChange);
     video.addEventListener('ended', onEnded);
-    video.addEventListener('progress', updateVideoProgress); // For buffer
+    video.addEventListener('progress', updateVideoProgress);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('canplay', onCanPlay);
-    video.addEventListener('playing', onPlaying);
-    video.addEventListener('error', onError);
-    
-    video.src = proxiedSrc; // Set the source to the proxied URL
-    video.load(); // Call load() after changing src
+    video.addEventListener('error', onErrorEvent);
+
+    if (video.src !== srcToLoad) {
+        console.log("VideoPlayer: Setting video.src to:", srcToLoad);
+        video.src = srcToLoad;
+        video.load(); // Call load() after changing src
+    } else if (video.readyState === 0 && srcToLoad) { // If src is same but not loaded
+        console.log("VideoPlayer: video.src is same but readyState is 0, calling load() for:", srcToLoad);
+        video.load();
+    }
+
 
     return () => {
+      console.log("VideoPlayer: Cleaning up for src:", srcToLoad);
       video.removeEventListener('timeupdate', updateVideoProgress);
       video.removeEventListener('loadedmetadata', setVideoDuration);
       video.removeEventListener('durationchange', setVideoDuration);
       video.removeEventListener('play', onPlay);
+      video.removeEventListener('playing', onPlaying);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('volumechange', onVolumeChange);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('progress', updateVideoProgress);
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('canplay', onCanPlay);
-      video.removeEventListener('playing', onPlaying);
-      video.removeEventListener('error', onError);
+      video.removeEventListener('error', onErrorEvent);
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      if (video && !video.paused) video.pause();
-      video.removeAttribute('src');
-      try { video.load(); } catch(e) { /* ignore */ }
+      // Don't pause or reset src here if component is just re-rendering with same src.
+      // Only reset src if srcToLoad becomes null, handled at top of effect.
     };
-  }, [proxiedSrc, originalSrc, showAndAutoHideControls]); // Depend on proxiedSrc
+  }, [originalSrc, handleError, showAndAutoHideControls]); // Depend on originalSrc (the prop)
 
   useEffect(() => {
     const playerElement = playerContainerRef.current;
@@ -222,7 +240,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
         };
         const leaveHandler = () => {
             if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-            if (isPlaying) controlsTimeoutRef.current = setTimeout(hideControls, 300);
+            if (isPlaying && !isLoading) controlsTimeoutRef.current = setTimeout(hideControls, 300);
         };
 
         playerElement.addEventListener('mouseenter', enterHandler);
@@ -235,12 +253,22 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
             playerElement.removeEventListener('mouseleave', leaveHandler);
         };
     }
-  }, [isPlaying, showAndAutoHideControls, hideControls]);
+  }, [isPlaying, showAndAutoHideControls, hideControls, isLoading]);
 
   const handlePlayPauseButtonClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent click from bubbling to container
-    handleMainClick();
-  }, [handleMainClick]);
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (video) {
+      if (video.paused || video.ended) {
+        video.play().catch(err => {
+          console.error("VideoPlayer Error on manual play:", err);
+          handleError(video, originalSrc);
+        });
+      } else {
+        video.pause();
+      }
+    }
+  }, [originalSrc, handleError]);
 
   const handleVolumeSliderChange = (newVolume: number[]) => {
     if (videoRef.current) {
@@ -256,7 +284,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
       const newMutedState = !videoRef.current.muted;
       videoRef.current.muted = newMutedState;
       if (!newMutedState && videoRef.current.volume === 0) {
-        videoRef.current.volume = 0.5; // Restore to default if unmuting and vol was 0
+        videoRef.current.volume = 0.5;
       }
     }
   };
@@ -267,7 +295,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
       videoRef.current.currentTime = newTime;
     }
   };
-  
+
   const handleSeekAmountClick = (e: React.MouseEvent, amount: number) => {
     e.stopPropagation();
     if (videoRef.current && duration > 0) {
@@ -283,7 +311,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
     if (!document.fullscreenElement) {
       player.requestFullscreen().catch(err => {
         console.warn(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
-        setPlayerError(`Não foi possível ativar tela cheia: ${err.message}`);
+        // setPlayerError(`Não foi possível ativar tela cheia: ${err.message}`); // Avoid setting player error for this
       });
     } else {
       if (document.exitFullscreen) {
@@ -291,7 +319,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
       }
     }
   };
-  
+
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFsChange);
@@ -300,7 +328,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
 
   const VolumeIcon = isMuted || volume === 0 ? VolumeX : volume > 0.5 ? Volume2 : Volume1;
 
-  if (!originalSrc && !isLoading && !playerError) { // If src is explicitly null (no stream selected)
+  if (!originalSrc && !isLoading && !playerError) {
     return (
       <div ref={playerContainerRef} className="w-full aspect-video relative bg-black rounded-lg shadow-2xl group/player flex flex-col items-center justify-center text-muted-foreground p-4">
         <WifiOff className="w-16 h-16 mb-4" />
@@ -313,7 +341,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
     <div
       ref={playerContainerRef}
       className="w-full aspect-video relative group/player bg-black rounded-lg shadow-2xl overflow-hidden"
-      onClick={handleMainClick} 
+      onClick={handlePlayPauseButtonClick}
     >
       <video ref={videoRef} className="w-full h-full object-contain" playsInline />
 
@@ -331,8 +359,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
         </div>
       )}
 
-      {/* Controls shown if src is present and no critical error initially */}
-      { proxiedSrc && !playerError && (
+      { originalSrc && !playerError && (
           <div
             className={cn(
               "absolute bottom-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-300 ease-in-out z-20",
@@ -347,7 +374,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
                   onValueChange={handleProgressSliderChange}
                   max={100}
                   step={0.1}
-                  disabled={isLoading || duration === 0}
+                  disabled={isLoading || duration === 0 || playerError !== null}
                   className="w-full h-2 [&>span:first-child]:h-2 [&_[role=slider]]:w-3.5 [&_[role=slider]]:h-3.5 [&_[role=slider]]:border-2"
                   aria-label="Progresso do vídeo"
                 />
@@ -356,7 +383,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
                   style={{ width: `${bufferProgress}%` }}
                 />
             </div>
-            
+
             <div className="flex items-center justify-between text-primary-foreground">
               <div className="flex items-center gap-1 sm:gap-2">
                 <Button variant="ghost" size="icon" onClick={(e) => handleSeekAmountClick(e, -10)} className="text-primary-foreground hover:bg-white/10 hover:text-accent">
@@ -378,7 +405,7 @@ const VideoPlayer: FC<VideoPlayerProps> = ({ src: originalSrc, title = "Video" }
                   step={0.01}
                   className="w-16 sm:w-20 h-2 [&>span:first-child]:h-2 [&_[role=slider]]:w-3 [&_[role=slider]]:h-3 [&_[role=slider]]:border-2"
                   aria-label="Controle de Volume"
-                  onClick={(e) => e.stopPropagation()} 
+                  onClick={(e) => e.stopPropagation()}
                 />
               </div>
 
