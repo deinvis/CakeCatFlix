@@ -28,8 +28,8 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
       setIsLoading(true);
       setError(null);
     } else {
-      setIsLoading(false); // Stop loading if streamUrl becomes null
-      setError(null); // Clear error if streamUrl becomes null
+      setIsLoading(false); 
+      setError(null); 
     }
   }, [streamUrl]);
 
@@ -41,15 +41,16 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
 
   const handleError = (e: any, data?: any, hlsInstance?: any, hlsGlobal?: any) => {
     setIsLoading(false);
-    let errorMessage = "Ocorreu um erro ao carregar o vídeo."; // Default
+    let errorMessage = "Ocorreu um erro ao carregar o vídeo."; 
 
+    // Check for CORS-like empty error objects
     const suspectedCorsIssue = typeof e === 'object' && e !== null && Object.keys(e).length === 0 && !data;
 
     console.error(
       "VideoPlayer Error (Raw Details):",
       {
         errorObj: e,
-        dataObj: data,
+        dataObj: typeof data === 'object' ? data : { value: data, type: typeof data }, // Refined logging for data
         hlsInstanceObj: hlsInstance,
         hlsGlobalObj: hlsGlobal,
         streamUrl: streamUrl,
@@ -64,12 +65,12 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
         errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível e não corrompido.";
       } else if (e?.message) {
         errorMessage = `Erro no player: ${e.message}`;
-      } else if (data?.type) {
+      } else if (typeof data === 'object' && data?.type) {
         errorMessage = `Erro do player: ${data.type}${data.details ? ` (${data.details})` : ''}`;
       }
     } else if (e?.message) {
       errorMessage = `Erro no player: ${e.message}`;
-    } else if (data?.type) {
+    } else if (typeof data === 'object' && data?.type) {
       errorMessage = `Erro do player: ${data.type}${data.details ? ` (${data.details})` : ''}`;
     }
     
@@ -79,7 +80,7 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
 
   const handleBuffer = () => {
     console.log("VideoPlayer: Buffering...");
-    if (!error) setIsLoading(true); // Only show loading if no error
+    if (!error) setIsLoading(true); 
   }
   const handleBufferEnd = () => {
     console.log("VideoPlayer: BufferEnd");
@@ -87,8 +88,8 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
   }
   const handlePlay = () => {
     console.log("VideoPlayer: Play");
-    if (!error) setIsLoading(false); // Should not be loading if play starts
-    setError(null); // Clear error on successful play
+    if (!error) setIsLoading(false); 
+    setError(null); 
   }
 
   if (!isClient) {
@@ -140,8 +141,6 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
                 attributes: {
                     crossOrigin: 'anonymous', 
                 },
-                // forceVideo: streamUrl?.toLowerCase().endsWith('.mp4'), // Can sometimes help for ambiguous URLs, but usually not needed
-                // forceHLS: streamUrl?.toLowerCase().endsWith('.m3u8'),
               },
             }}
           />
