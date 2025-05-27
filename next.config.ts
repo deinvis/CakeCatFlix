@@ -19,6 +19,12 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'http',
+        hostname: 'appcliente.com', // Added this hostname
+        port: '', // Allow any port, or specify if known (e.g., '8880')
+        pathname: '/**',
+      },
+      {
+        protocol: 'http',
         hostname: '**', // Allow any hostname over HTTP
         port: '',
         pathname: '/**',
