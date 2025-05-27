@@ -139,7 +139,7 @@ export function PlaylistManagement() {
         nameToAdd = nameToAdd || `URL: ${sourceValue.substring(0,30)}${sourceValue.length > 30 ? '...' : ''}`;
         metadataBase.name = nameToAdd;
         
-        const response = await fetch(sourceValue);
+        const response = await fetch(sourceValue); // This is line 142 in your error
         if (!response.ok) {
           throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
         }
@@ -191,11 +191,11 @@ export function PlaylistManagement() {
           closeButton.click();
       }
 
-
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
         let description = error.message || "Ocorreu um erro desconhecido.";
-        if (type === 'url' && (description.toLowerCase().includes('failed to fetch') || description.includes('Falha ao buscar URL'))) {
+        // This specific handling for URL fetch errors was added previously
+        if (type === 'url' && (description.toLowerCase().includes('failed to fetch') || description.includes('falha ao buscar url'))) {
             description = "Falha ao buscar a URL. Verifique a conexão com a internet, a URL fornecida e se o servidor permite acesso externo (CORS).";
         }
         toast({ 
@@ -399,10 +399,6 @@ export function PlaylistManagement() {
                 </DialogFooter>
               </TabsContent>
             </Tabs>
-            {/* Note: DialogClose is now part of each tab's footer. 
-                If an error occurs during handleAddNewPlaylist, the dialog might close.
-                For more robust error handling where dialog stays open, would need to manage open state manually.
-            */}
           </DialogContent>
         </Dialog>
 
