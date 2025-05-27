@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, ChangeEvent } from 'react';
@@ -9,7 +10,7 @@ import {
   LOCALSTORAGE_PARENTAL_CONTROL_KEY,
   FILE_PLAYLIST_ITEM_LIMIT
 } from '@/lib/constants';
-import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo } from 'lucide-react';
+import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -94,7 +95,7 @@ export function PlaylistManagement() {
     let playlistId = Date.now().toString();
     let sourceValue = '';
     
-    const metadataBase: Omit<PlaylistMetadata, 'sourceValue' | 'itemCount'> = {
+    const metadataBase: Omit<PlaylistMetadata, 'sourceValue' | 'itemCount' | 'channelCount' | 'movieCount' | 'seriesCount'> = {
       id: playlistId,
       name: '', // Will be set below
       sourceType: type,
@@ -114,7 +115,7 @@ export function PlaylistManagement() {
       try {
         const fileContent = await newPlaylistFile.text();
         const parsedItems = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
-        await addPlaylistWithItems({ ...metadataBase, sourceValue, itemCount: parsedItems.length }, parsedItems);
+        await addPlaylistWithItems({ ...metadataBase, sourceValue }, parsedItems);
         toast({
           title: "Playlist Adicionada",
           description: `"${nameToAdd}" (${type}) foi adicionada com ${parsedItems.length} itens.`,
@@ -138,7 +139,7 @@ export function PlaylistManagement() {
       // TODO: Fetch and parse URL content
       // For now, just add metadata, items would be fetched/parsed on demand or via a background process.
       // This is a placeholder for actual URL fetching and parsing.
-      await addPlaylistWithItems({ ...metadataBase, sourceValue, itemCount: 0 }, []);
+      await addPlaylistWithItems({ ...metadataBase, sourceValue }, []);
       toast({
         title: "Playlist Adicionada (URL)",
         description: `"${nameToAdd}" foi adicionada. O processamento do conteúdo da URL não está implementado neste protótipo.`,
@@ -159,7 +160,6 @@ export function PlaylistManagement() {
       await addPlaylistWithItems({ 
         ...metadataBase, 
         sourceValue, 
-        itemCount: 0,
         xtreamUsername: xtreamUser,
         xtreamPassword: xtreamPassword 
       }, []);
@@ -209,7 +209,16 @@ export function PlaylistManagement() {
     if (editingPlaylist && editPlaylistName.trim()) {
       setIsLoading(true);
       try {
-        const updatedPlaylist = { ...editingPlaylist, name: editPlaylistName.trim() };
+        // Preserve existing counts if not re-evaluating items
+        const updatedPlaylist = { 
+            ...editingPlaylist, 
+            name: editPlaylistName.trim(),
+            // Ensure counts are preserved during simple name edit
+            itemCount: editingPlaylist.itemCount,
+            channelCount: editingPlaylist.channelCount,
+            movieCount: editingPlaylist.movieCount,
+            seriesCount: editingPlaylist.seriesCount,
+        };
         await updatePlaylistMetadata(updatedPlaylist);
         toast({
           title: "Playlist Atualizada",
@@ -376,11 +385,22 @@ export function PlaylistManagement() {
         ) : (
           <ul className="space-y-3">
             {playlists.map((playlist) => (
-              <li key={playlist.id} className="flex items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
-                <span className="font-medium text-foreground truncate flex-1 mr-2" title={playlist.name}>
-                  {playlist.name} ({playlist.itemCount ?? 0} itens)
-                  <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType})</span>
-                </span>
+              <li key={playlist.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
+                <div className="flex-1 mb-2 sm:mb-0 mr-2">
+                  <span className="font-medium text-foreground truncate block" title={playlist.name}>
+                    {playlist.name}
+                    <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType})</span>
+                  </span>
+                  <div className="text-xs text-muted-foreground flex items-center space-x-2 mt-1">
+                    <span>Total: {playlist.itemCount ?? 0}</span>
+                    <Separator orientation="vertical" className="h-3 bg-border"/>
+                    <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1"/> {playlist.channelCount ?? 0}</span>
+                    <Separator orientation="vertical" className="h-3 bg-border"/>
+                    <span className="flex items-center"><Film className="h-3 w-3 mr-1"/> {playlist.movieCount ?? 0}</span>
+                    <Separator orientation="vertical" className="h-3 bg-border"/>
+                    <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1"/> {playlist.seriesCount ?? 0}</span>
+                  </div>
+                </div>
                 <div className="space-x-1 flex-shrink-0">
                   <Dialog onOpenChange={(open) => { if(!open) setEditingPlaylist(null); }}>
                     <DialogTrigger asChild>
@@ -478,3 +498,4 @@ export function PlaylistManagement() {
     </Card>
   );
 }
+

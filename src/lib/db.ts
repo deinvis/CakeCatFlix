@@ -7,6 +7,9 @@ export interface PlaylistMetadata {
   sourceType: 'file' | 'url' | 'xtream';
   sourceValue: string; // filename, URL, or Xtream host
   itemCount?: number;
+  channelCount?: number;
+  movieCount?: number;
+  seriesCount?: number;
   createdAt: number; // Timestamp
   // For Xtream
   xtreamUsername?: string;
@@ -60,7 +63,30 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
     const metadataStore = transaction.objectStore(PLAYLIST_METADATA_STORE);
     const itemsStore = transaction.objectStore(PLAYLIST_ITEMS_STORE);
 
-    metadata.itemCount = items.length; // Ensure itemCount is set
+    // Calculate counts by type
+    let channelCount = 0;
+    let movieCount = 0;
+    let seriesCount = 0;
+
+    items.forEach(item => {
+      switch (item.itemType) {
+        case 'channel':
+          channelCount++;
+          break;
+        case 'movie':
+          movieCount++;
+          break;
+        case 'series':
+          seriesCount++;
+          break;
+      }
+    });
+
+    metadata.itemCount = items.length;
+    metadata.channelCount = channelCount;
+    metadata.movieCount = movieCount;
+    metadata.seriesCount = seriesCount;
+    
     const metaRequest = metadataStore.put(metadata);
 
     metaRequest.onerror = () => reject(transaction.error || new Error("Failed to add playlist metadata."));
