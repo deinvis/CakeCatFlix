@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
@@ -12,70 +12,77 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input'; // Added Input import
+import { Input } from '@/components/ui/input';
 
 const ITEMS_PER_PAGE = 28;
+
+// Helper to transform raw PlaylistItem (episode) to an aggregated Series Card
+const transformEpisodeDataToSeriesCard = (episodes: PlaylistItem[]): Map<string, ContentItemForCard> => {
+    const seriesMap = new Map<string, ContentItemForCard>();
+    episodes.forEach(episode => {
+        const seriesKey = episode.seriesTitle || episode.title; // seriesTitle should be preferred
+        if (!seriesKey) return;
+
+        if (!seriesMap.has(seriesKey)) {
+            seriesMap.set(seriesKey, {
+                id: episode.tvgId || episode.seriesTitle || episode.id!.toString(), // A unique ID for the series, tvgId or title
+                seriesId: episode.tvgId || episode.seriesTitle || episode.id!.toString(), // ID used for navigation to series player
+                title: episode.seriesTitle || episode.title,
+                imageUrl: episode.logoUrl,
+                type: 'series',
+                genre: episode.genre || episode.groupTitle,
+                dataAiHint: `series ${episode.seriesTitle || episode.genre || ''}`.substring(0, 50).trim().toLowerCase(),
+                sourceCount: 0, // Will count episodes
+            });
+        }
+        const seriesCard = seriesMap.get(seriesKey)!;
+        seriesCard.sourceCount = (seriesCard.sourceCount || 0) + 1; // Increment episode count
+        // Logic to pick a "better" imageUrl, e.g., from S01E01 or if current one is missing
+        if (episode.logoUrl && (!seriesCard.imageUrl || (episode.seasonNumber === 1 && episode.episodeNumber === 1))) {
+            seriesCard.imageUrl = episode.logoUrl;
+        }
+    });
+    return seriesMap;
+};
+
 
 export default function SeriesGenrePage() {
   const params = useParams<{ genreName: string }>();
   const genreNameDecoded = params.genreName ? decodeURIComponent(params.genreName) : "Unknown Genre";
 
-  const [seriesCardItems, setSeriesCardItems] = useState<ContentItemForCard[]>([]);
+  const [allFetchedSeriesForGenre, setAllFetchedSeriesForGenre] = useState<ContentItemForCard[]>([]);
+  const [displayedItems, setDisplayedItems] = useState<ContentItemForCard[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
+  const [isPaginating, setIsPaginating] = useState(false);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [genreExistsInMock, setGenreExistsInMock] = useState<boolean | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // For future search functionality
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     const foundGenre = MOCK_SERIES_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
     setGenreExistsInMock(!!foundGenre);
   }, [genreNameDecoded]);
 
-  const fetchSeriesByGenre = useCallback(async (playlistId: string, genre: string, page: number) => {
+  const fetchAllSeriesForGenre = useCallback(async (playlistId: string, genre: string) => {
     if (!playlistId || !genre) return;
     setIsLoading(true);
     try {
-      const offset = (page - 1) * ITEMS_PER_PAGE;
-      // Fetch all episodes of this genre first
-      // TODO: When search is implemented, pass searchTerm to getPlaylistItemsByGroup or filter results
+      // Fetch ALL episode items for this genre to aggregate into series cards
       const episodeItemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, undefined, undefined, 'series_episode');
       
-      const seriesMap = new Map<string, ContentItemForCard>();
-      episodeItemsFromDB.forEach(episode => {
-        const seriesKey = episode.seriesTitle || episode.title;
-        if(!seriesKey) return;
-
-        if (!seriesMap.has(seriesKey)) {
-          seriesMap.set(seriesKey, {
-            id: episode.seriesTitle || episode.id!.toString(), // Use seriesTitle as ID for aggregation, or first episode ID
-            title: episode.seriesTitle || episode.title,
-            imageUrl: episode.logoUrl, 
-            type: 'series',
-            genre: episode.genre || episode.groupTitle,
-            dataAiHint: `series ${episode.seriesTitle || episode.genre || ''}`.substring(0, 50).trim().toLowerCase(),
-            seriesId: episode.tvgId || episode.seriesTitle, 
-            sourceCount: 0, 
-          });
-        }
-        const seriesCard = seriesMap.get(seriesKey)!;
-        seriesCard.sourceCount = (seriesCard.sourceCount || 0) + 1;
-        if (episode.logoUrl && (!seriesCard.imageUrl || (episode.seasonNumber === 1 && episode.episodeNumber === 1))){
-            seriesCard.imageUrl = episode.logoUrl;
-        }
-      });
+      const seriesMap = transformEpisodeDataToSeriesCard(episodeItemsFromDB as PlaylistItem[]);
+      const allUniqueSeries = Array.from(seriesMap.values()).sort((a, b) => a.title.localeCompare(b.title));
       
-      const allUniqueSeriesForGenre = Array.from(seriesMap.values()).sort((a,b) => a.title.localeCompare(b.title));
-      const paginatedSeries = allUniqueSeriesForGenre.slice(offset, offset + ITEMS_PER_PAGE);
-      
-      setSeriesCardItems(prevItems => page === 1 ? paginatedSeries : [...prevItems, ...paginatedSeries]);
-      setHasMore(allUniqueSeriesForGenre.length > (offset + ITEMS_PER_PAGE));
-
+      setAllFetchedSeriesForGenre(allUniqueSeries);
+      setCurrentPage(1);
     } catch (error) {
-      console.error(`Failed to fetch series for genre "${genre}":`, error);
-      setSeriesCardItems(prev => page === 1 ? [] : prev);
+      console.error(`Failed to fetch all series for genre "${genre}":`, error);
+      setAllFetchedSeriesForGenre([]);
     } finally {
       setIsLoading(false);
     }
@@ -85,47 +92,84 @@ export default function SeriesGenrePage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
-      setSeriesCardItems([]); 
-      setCurrentPage(1); 
-      setHasMore(true); 
+      setAllFetchedSeriesForGenre([]);
+      setDisplayedItems([]);
+      setCurrentPage(1);
+      setHasMore(true);
+      setSearchTerm('');
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
           setActivePlaylistId(firstPlaylistId);
-          await fetchSeriesByGenre(firstPlaylistId, genreNameDecoded, 1);
+          if (genreNameDecoded !== "Unknown Genre") {
+            await fetchAllSeriesForGenre(firstPlaylistId, genreNameDecoded);
+          } else {
+             setAllFetchedSeriesForGenre([]);
+          }
         } else {
           setHasPlaylistsConfigured(false);
         }
       } catch (error) {
         console.error("Failed to initialize series genre page:", error);
         setHasPlaylistsConfigured(false);
-      } finally {
-        setIsLoading(false);
       }
     }
-    if (genreNameDecoded !== "Unknown Genre") {
+     if (genreNameDecoded !== "Unknown Genre") {
         initialize();
     } else {
         setIsLoading(false);
+        setDisplayedItems([]);
         setHasPlaylistsConfigured(false);
     }
-  }, [genreNameDecoded, fetchSeriesByGenre]); // fetchSeriesByGenre added as dependency
+  }, [genreNameDecoded, fetchAllSeriesForGenre]);
+
+  // Effect for filtering and pagination
+  useEffect(() => {
+    if (isLoading) return; 
+
+    setIsPaginating(true);
+    const filtered = allFetchedSeriesForGenre.filter(item =>
+      item.title.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+    const newPageItems = filtered.slice(offset, offset + ITEMS_PER_PAGE);
+
+    if (currentPage === 1) {
+      setDisplayedItems(newPageItems);
+    } else {
+      // Prevent adding duplicates if effect runs multiple times with same newPageItems
+      setDisplayedItems(prevItems => {
+        const existingIds = new Set(prevItems.map(item => item.id));
+        const trulyNewItems = newPageItems.filter(item => !existingIds.has(item.id));
+        return trulyNewItems.length > 0 ? [...prevItems, ...trulyNewItems] : prevItems;
+      });
+    }
+    setHasMore(filtered.length > offset + ITEMS_PER_PAGE);
+    setIsPaginating(false);
+
+  }, [allFetchedSeriesForGenre, searchTerm, currentPage, isLoading]);
 
   const loadMoreItems = () => {
-    if (activePlaylistId && hasMore && !isLoading) {
-      const nextPage = currentPage + 1;
-      setCurrentPage(nextPage);
-      fetchSeriesByGenre(activePlaylistId, genreNameDecoded, nextPage);
+    if (hasMore && !isPaginating && !isLoading) {
+      setCurrentPage(prevPage => prevPage + 1);
     }
   };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+    setCurrentPage(1); 
+    setDisplayedItems([]); 
+  };
   
-  if (hasPlaylistsConfigured === null || (isLoading && seriesCardItems.length === 0 && genreNameDecoded !== "Unknown Genre")) {
+  if (hasPlaylistsConfigured === null || (isLoading && allFetchedSeriesForGenre.length === 0 && genreNameDecoded !== "Unknown Genre")) {
      return (
          <div className="container mx-auto px-0">
-            <div className="mb-4">
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <Skeleton className="h-10 w-48 rounded-md" />
+                <Skeleton className="h-10 w-full sm:w-auto sm:max-w-xs rounded-md" />
             </div>
             <PageHeader title={genreNameDecoded} description={`Explorando as melhores séries de ${genreNameDecoded}...`} />
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 md:gap-6">
@@ -141,7 +185,7 @@ export default function SeriesGenrePage() {
     );
   }
   
-  if (genreExistsInMock === false && !isLoading && seriesCardItems.length === 0 && hasPlaylistsConfigured === true) {
+  if (genreExistsInMock === false && !isLoading && allFetchedSeriesForGenre.length === 0 && hasPlaylistsConfigured === true) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
         <PageHeader title="Gênero Não Encontrado" description={`O gênero de série "${genreNameDecoded}" não parece existir ou nenhum conteúdo está disponível nas suas playlists.`} />
@@ -169,27 +213,28 @@ export default function SeriesGenrePage() {
           placeholder={`Buscar em ${genreNameDecoded}...`} 
           className="w-full sm:w-auto sm:max-w-xs"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          // TODO: Implement search logic
+          onChange={handleSearchChange}
         />
       </div>
       <PageHeader title={genreNameDecoded} description={`Explore as melhores séries de TV de ${genreNameDecoded}.`} />
       {hasPlaylistsConfigured ? (
-         seriesCardItems.length > 0 || isLoading ? (
+         (displayedItems.length > 0 || isLoading || isPaginating) ? (
             <ContentGrid 
-            items={seriesCardItems} 
+            items={displayedItems} 
             type="series" 
-            isLoading={isLoading && seriesCardItems.length === 0}
+            isLoading={isLoading && displayedItems.length === 0}
             loadMoreItems={loadMoreItems}
             hasMore={hasMore}
             />
         ) : (
-             !isLoading && <p className="text-muted-foreground text-center py-8">Nenhuma série encontrada para o gênero "{genreNameDecoded}" nas suas playlists.</p>
+             !isLoading && !isPaginating && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhuma série encontrada para "{searchTerm}" em "{genreNameDecoded}".</p>
+        ) || (
+             !isLoading && !isPaginating && <p className="text-muted-foreground text-center py-8">Nenhuma série encontrada para o gênero "{genreNameDecoded}" nas suas playlists.</p>
         )
       ) : (
          <PlaceholderContent type="séries" message={`Nenhuma playlist configurada ou nenhuma série de ${genreNameDecoded} encontrada.`} />
       )}
-       {isLoading && seriesCardItems.length > 0 && (
+       {(isPaginating && displayedItems.length > 0) && (
         <p className="text-muted-foreground text-center py-8">Carregando mais séries...</p>
       )}
     </div>

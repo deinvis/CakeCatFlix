@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input'; // Added Input import
+import { Input } from '@/components/ui/input';
 
 const ITEMS_PER_PAGE = 28;
 
@@ -23,45 +23,43 @@ const transformPlaylistItemToCardItem = (item: PlaylistItem): ContentItemForCard
   type: 'movie',
   genre: item.genre || item.groupTitle,
   dataAiHint: `movie ${item.genre || item.groupTitle || item.title || ''}`.substring(0, 50).trim().toLowerCase(),
-  streamUrl: item.streamUrl, // Assuming streamUrl is directly on the PlaylistItem for movies
+  streamUrl: item.streamUrl,
 });
 
 export default function MovieGenrePage() {
   const params = useParams<{ genreName: string }>();
   const genreNameDecoded = params.genreName ? decodeURIComponent(params.genreName) : "Unknown Genre";
 
-  const [movieItems, setMovieItems] = useState<ContentItemForCard[]>([]);
+  const [allFetchedItemsForGenre, setAllFetchedItemsForGenre] = useState<ContentItemForCard[]>([]);
+  const [displayedItems, setDisplayedItems] = useState<ContentItemForCard[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
+  const [isPaginating, setIsPaginating] = useState(false);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean|null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [genreExistsInMock, setGenreExistsInMock] = useState<boolean | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // For future search functionality
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // This check is based on mock genres for UI consistency before DB is fully queried for all genres
     const foundGenre = MOCK_MOVIE_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
     setGenreExistsInMock(!!foundGenre);
   }, [genreNameDecoded]);
 
-
-  const fetchMoviesByGenre = useCallback(async (playlistId: string, genre: string, page: number) => {
+  const fetchAllMoviesForGenre = useCallback(async (playlistId: string, genre: string) => {
     if (!playlistId || !genre) return;
     setIsLoading(true);
     try {
-      const offset = (page - 1) * ITEMS_PER_PAGE;
-      // TODO: When search is implemented, pass searchTerm to getPlaylistItemsByGroup
-      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, ITEMS_PER_PAGE, offset, 'movie');
-      
-      const newCardItems = itemsFromDB.map(transformPlaylistItemToCardItem);
-      
-      setMovieItems(prevItems => page === 1 ? newCardItems : [...prevItems, ...newCardItems]);
-      setHasMore(newCardItems.length === ITEMS_PER_PAGE);
-
+      // Fetch ALL items for this genre from the DB, no limit/offset initially for client-side search
+      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, undefined, undefined, 'movie');
+      const cardItems = itemsFromDB.map(transformPlaylistItemToCardItem);
+      setAllFetchedItemsForGenre(cardItems);
+      setCurrentPage(1); // Reset page when new full list is fetched
     } catch (error) {
-      console.error(`Failed to fetch movies for genre "${genre}":`, error);
-      setMovieItems(prev => page === 1 ? [] : prev); 
+      console.error(`Failed to fetch all movies for genre "${genre}":`, error);
+      setAllFetchedItemsForGenre([]);
     } finally {
       setIsLoading(false);
     }
@@ -71,48 +69,81 @@ export default function MovieGenrePage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
-      setMovieItems([]); 
-      setCurrentPage(1); 
+      setAllFetchedItemsForGenre([]);
+      setDisplayedItems([]);
+      setCurrentPage(1);
       setHasMore(true);
+      setSearchTerm('');
 
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
-          const firstPlaylistId = playlists[0].id; 
+          const firstPlaylistId = playlists[0].id;
           setActivePlaylistId(firstPlaylistId);
-          await fetchMoviesByGenre(firstPlaylistId, genreNameDecoded, 1);
+          if (genreNameDecoded !== "Unknown Genre") {
+            await fetchAllMoviesForGenre(firstPlaylistId, genreNameDecoded);
+          } else {
+            setAllFetchedItemsForGenre([]);
+          }
         } else {
           setHasPlaylistsConfigured(false);
         }
       } catch (error) {
         console.error("Failed to initialize movie genre page:", error);
         setHasPlaylistsConfigured(false);
-      } finally {
-        setIsLoading(false);
       }
     }
     if (genreNameDecoded !== "Unknown Genre") {
         initialize();
     } else {
         setIsLoading(false);
-        setHasPlaylistsConfigured(false); 
+        setDisplayedItems([]);
+        setHasPlaylistsConfigured(false);
     }
-  }, [genreNameDecoded, fetchMoviesByGenre]); // fetchMoviesByGenre added as dependency
+  }, [genreNameDecoded, fetchAllMoviesForGenre]);
+
+  // Effect for filtering and pagination
+  useEffect(() => {
+    if (isLoading) return; // Don't process if initial full load is happening
+
+    setIsPaginating(true);
+    const filtered = allFetchedItemsForGenre.filter(item =>
+      item.title.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+    const newPageItems = filtered.slice(offset, offset + ITEMS_PER_PAGE);
+
+    if (currentPage === 1) {
+      setDisplayedItems(newPageItems);
+    } else {
+      setDisplayedItems(prevItems => [...prevItems, ...newPageItems]);
+    }
+    setHasMore(filtered.length > offset + ITEMS_PER_PAGE);
+    setIsPaginating(false);
+
+  }, [allFetchedItemsForGenre, searchTerm, currentPage, isLoading]);
+
 
   const loadMoreItems = () => {
-    if (activePlaylistId && hasMore && !isLoading) {
-      const nextPage = currentPage + 1;
-      setCurrentPage(nextPage); 
-      fetchMoviesByGenre(activePlaylistId, genreNameDecoded, nextPage);
+    if (hasMore && !isPaginating && !isLoading) {
+      setCurrentPage(prevPage => prevPage + 1);
     }
   };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+    setCurrentPage(1); // Reset to first page on new search
+    setDisplayedItems([]); // Clear displayed items to re-trigger pagination effect for new search
+  };
   
-  if (hasPlaylistsConfigured === null || (isLoading && movieItems.length === 0 && genreNameDecoded !== "Unknown Genre")) {
+  if (hasPlaylistsConfigured === null || (isLoading && allFetchedItemsForGenre.length === 0 && genreNameDecoded !== "Unknown Genre")) {
     return (
          <div className="container mx-auto px-0">
-            <div className="mb-4">
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <Skeleton className="h-10 w-48 rounded-md" />
+                <Skeleton className="h-10 w-full sm:w-auto sm:max-w-xs rounded-md" />
             </div>
             <PageHeader title={genreNameDecoded} description={`Descobrindo os melhores filmes de ${genreNameDecoded}...`} />
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 md:gap-6">
@@ -128,7 +159,7 @@ export default function MovieGenrePage() {
     );
   }
   
-  if (genreExistsInMock === false && !isLoading && movieItems.length === 0 && hasPlaylistsConfigured === true) {
+  if (genreExistsInMock === false && !isLoading && allFetchedItemsForGenre.length === 0 && hasPlaylistsConfigured === true) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
         <PageHeader title="Gênero Não Encontrado" description={`O gênero de filme "${genreNameDecoded}" não parece existir ou nenhum conteúdo está disponível nas suas playlists.`} />
@@ -157,27 +188,28 @@ export default function MovieGenrePage() {
           placeholder={`Buscar em ${genreNameDecoded}...`} 
           className="w-full sm:w-auto sm:max-w-xs"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          // TODO: Implement search logic by re-fetching or filtering client-side
+          onChange={handleSearchChange}
         />
       </div>
       <PageHeader title={genreNameDecoded} description={`Descubra os melhores filmes de ${genreNameDecoded}.`} />
       {hasPlaylistsConfigured ? (
-        movieItems.length > 0 || isLoading ? (
+        (displayedItems.length > 0 || isLoading || isPaginating) ? (
             <ContentGrid 
-            items={movieItems} 
+            items={displayedItems} 
             type="movie" 
-            isLoading={isLoading && movieItems.length === 0}
+            isLoading={isLoading && displayedItems.length === 0} // Show loading for grid only if it's the initial full load and no items yet
             loadMoreItems={loadMoreItems}
             hasMore={hasMore}
             />
         ) : (
-             !isLoading && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado para o gênero "{genreNameDecoded}" nas suas playlists.</p>
+             !isLoading && !isPaginating && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado para "{searchTerm}" em "{genreNameDecoded}".</p>
+        ) || (
+             !isLoading && !isPaginating && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado para o gênero "{genreNameDecoded}" nas suas playlists.</p>
         )
       ) : (
          <PlaceholderContent type="filmes" message={`Nenhuma playlist configurada ou nenhum filme de ${genreNameDecoded} encontrado.`}/>
       )}
-       {isLoading && movieItems.length > 0 && (
+       {(isPaginating && displayedItems.length > 0) && ( // Show paginating indicator if not initial load
         <p className="text-muted-foreground text-center py-8">Carregando mais filmes...</p>
       )}
     </div>
