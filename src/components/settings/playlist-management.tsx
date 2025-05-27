@@ -194,9 +194,13 @@ export function PlaylistManagement() {
 
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
+        let description = error.message || "Ocorreu um erro desconhecido.";
+        if (type === 'url' && (description.toLowerCase().includes('failed to fetch') || description.includes('Falha ao buscar URL'))) {
+            description = "Falha ao buscar a URL. Verifique a conexão com a internet, a URL fornecida e se o servidor permite acesso externo (CORS).";
+        }
         toast({ 
             title: `Erro ao Adicionar Playlist ${type.toUpperCase()}`, 
-            description: error.message || "Ocorreu um erro desconhecido.", 
+            description: description, 
             variant: "destructive",
             duration: 7000 
         });
