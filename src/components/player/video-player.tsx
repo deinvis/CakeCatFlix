@@ -9,7 +9,7 @@ import { AlertTriangle, WifiOff } from 'lucide-react';
 interface VideoPlayerProps {
   streamUrl: string | null;
   onEnded?: () => void;
-  onError?: (error: any) => void;
+  onError?: (error: any, data?: any) => void;
   playing?: boolean;
 }
 
@@ -24,67 +24,74 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
 
   useEffect(() => {
     if (streamUrl) {
+      console.log("VideoPlayer: New streamUrl received:", streamUrl);
       setIsLoading(true);
       setError(null);
     } else {
       setIsLoading(false);
-      // Don't set an error here if streamUrl is null initially,
-      // it might just mean no source is selected yet.
-      // The UI handles the "Nenhuma fonte de vídeo selecionada" message.
+      setError(null); // Clear error if streamUrl becomes null (e.g. source deselected)
     }
   }, [streamUrl]);
 
-  const handleReady = () => setIsLoading(false);
+  const handleReady = () => {
+    console.log("VideoPlayer: Ready");
+    setIsLoading(false);
+    setError(null); // Clear any previous error on ready
+  };
 
   const handleError = (e: any, data?: any, hlsInstance?: any, hlsGlobal?: any) => {
     setIsLoading(false);
     let errorMessage = "Ocorreu um erro ao carregar o vídeo."; // Default
 
-    if (typeof e === 'string') {
-        errorMessage = e;
-    } else if (data && data.type === 'networkError') {
-        errorMessage = "Erro de rede. Verifique sua conexão e se a URL do stream está acessível.";
-    } else if (e && e.message) {
-        errorMessage = e.message;
-    } else if (data && typeof data === 'object') {
-        // Try to get more info from data if e was not informative
-        if (data.details && typeof data.details === 'string') {
-            errorMessage = `Detalhes do erro: ${data.details}`;
-        } else if (data.type && typeof data.type === 'string') {
-             errorMessage = `Erro do player: ${data.type}`;
-        }
-    } else if (typeof e === 'object' && e !== null && Object.keys(e).length > 0) {
-        // Fallback for other error objects
-        try {
-            const eString = JSON.stringify(e);
-            errorMessage = `Erro do player: ${eString}`;
-        } catch (stringifyError) {
-            if (e.toString && e.toString() !== '[object Object]') {
-                errorMessage = e.toString();
-            }
-            // If all fails, stick to the default message
-        }
-    }
+    // Log more detailed error information to the console for debugging
+    console.error("VideoPlayer Error (Raw Details):", { 
+        errorObj: e, 
+        dataObj: data, 
+        hlsInstanceObj: hlsInstance, 
+        hlsGlobalObj: hlsGlobal,
+        streamUrl: streamUrl 
+    });
 
-    // Refined console logging
-    if (e && typeof e === 'object' && Object.keys(e).length === 0 && data === undefined) {
-        console.warn("VideoPlayer: Recebeu um erro genérico do player sem detalhes específicos.", "Raw error object:", e, "Data:", data);
-    } else {
-        console.error("VideoPlayer Error (Raw Details):", { errorObj: e, dataObj: data, hlsInstanceObj: hlsInstance, hlsGlobalObj: hlsGlobal });
+    if (streamUrl?.toLowerCase().endsWith('.mp4')) {
+        if (e?.type === 'error' && (data?.type === 'networkError' || data?.details?.includes('manifestLoadError'))) {
+            errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível.";
+        } else if (typeof e === 'object' && Object.keys(e).length === 0 && !data) {
+            // This is a common sign of a CORS issue when direct error details are suppressed by the browser
+            errorMessage = "Não foi possível carregar o vídeo MP4. Isso pode ser devido a restrições de CORS no servidor de vídeo ou o arquivo pode não estar acessível. Tente abrir a URL do vídeo diretamente em outra aba do navegador.";
+        } else if (e?.message) {
+            errorMessage = e.message;
+        } else if (data?.type) {
+            errorMessage = `Erro do player: ${data.type}`;
+        }
+    } else if (e?.message) { // For non-MP4 or if MP4-specific checks didn't catch it
+        errorMessage = e.message;
+    } else if (data?.type) {
+        errorMessage = `Erro do player: ${data.type}`;
     }
     
     setError(errorMessage);
-    if (onError) onError(e); // Propagate original error if a handler is passed as prop
+    if (onError) onError(e, data); // Propagate original error if a handler is passed as prop
   };
 
-  const handleBuffer = () => setIsLoading(true);
-  const handleBufferEnd = () => setIsLoading(false);
+  const handleBuffer = () => {
+    console.log("VideoPlayer: Buffering...");
+    setIsLoading(true);
+  }
+  const handleBufferEnd = () => {
+    console.log("VideoPlayer: BufferEnd");
+    setIsLoading(false);
+  }
+  const handlePlay = () => {
+    console.log("VideoPlayer: Play");
+    setIsLoading(false); // Should not be loading if play starts
+    setError(null);
+  }
 
   if (!isClient) {
     return <Skeleton className="w-full aspect-video rounded-lg bg-muted" />;
   }
 
-  if (!streamUrl && !error) { // Show placeholder if no stream and no error yet
+  if (!streamUrl && !error) {
     return (
       <div className="w-full aspect-video flex flex-col items-center justify-center bg-muted rounded-lg text-muted-foreground">
         <WifiOff className="h-16 w-16 mb-4" />
@@ -96,28 +103,29 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
   
   return (
     <div className="w-full aspect-video relative bg-black rounded-lg overflow-hidden shadow-2xl">
-      {isLoading && !error && ( // Show loading skeleton only if no error
-        <div className="absolute inset-0 flex items-center justify-center z-10">
-          <Skeleton className="w-full h-full" />
+      {(isLoading && streamUrl && !error) && ( 
+        <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/50">
+          <Skeleton className="w-full h-full opacity-50" />
            <div className="absolute text-primary-foreground text-lg">Carregando...</div>
         </div>
       )}
-      {error && ( // Display error message prominently
+      {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-destructive-foreground bg-destructive/80 p-4 z-10">
           <AlertTriangle className="h-12 w-12 mb-2" />
           <p className="font-semibold">Erro ao Carregar Vídeo</p>
           <p className="text-sm text-center">{error}</p>
         </div>
       )}
-      {streamUrl && ( // Only attempt to render ReactPlayer if streamUrl is present
+      {streamUrl && ( 
          <ReactPlayer
-            key={streamUrl} // Re-initialize player if URL changes
+            key={streamUrl} 
             url={streamUrl}
-            playing={playing && !error && !isLoading} // Play only if no error and not initial loading after URL change
+            playing={playing && !error && !isLoading} 
             controls
             width="100%"
             height="100%"
             onReady={handleReady}
+            onPlay={handlePlay}
             onBuffer={handleBuffer}
             onBufferEnd={handleBufferEnd}
             onError={handleError}
@@ -125,9 +133,11 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
             className="absolute top-0 left-0"
             config={{
               file: {
-                forceHLS: streamUrl.includes('.m3u8'),
+                // forceHLS: streamUrl.includes('.m3u8'), // Use this if you know it's HLS
+                // forceVideo: streamUrl.toLowerCase().endsWith('.mp4'), // Usually not needed for MP4
                 attributes: {
-                    crossOrigin: 'anonymous' 
+                    crossOrigin: 'anonymous', // Helps with CORS if server supports it
+                    // controlsList: 'nodownload', // Example: to disable download button
                 }
               },
             }}
