@@ -1,5 +1,6 @@
 
-import type { PlaylistItem, PlaylistItemType } from '@/lib/constants';
+import type { PlaylistItem } from '@/lib/constants'; // PlaylistItemType removed as it's not directly used here.
+import { normalizeText as normalizeForComparison } from '@/lib/utils'; // Renamed for clarity
 
 /**
  * Extracts base channel name and quality from a channel title.
@@ -9,17 +10,20 @@ import type { PlaylistItem, PlaylistItemType } from '@/lib/constants';
  */
 export function extractChannelDetails(name: string): { baseChannelName: string; quality?: string } {
   const qualityPatterns = /\s+(4K|UHD|FHD|HD|SD|1080P|720P|HEVC)(\s+\(.*\)|$)/i;
-  const match = name.match(qualityPatterns);
+  const qualityMatch = name.match(qualityPatterns);
   let baseChannelName = name;
   let quality;
 
-  if (match) {
-    quality = match[1].toUpperCase();
-    baseChannelName = name.substring(0, match.index).trim();
+  if (qualityMatch) {
+    quality = qualityMatch[1].toUpperCase();
+    // Remove the quality and any subsequent parenthesized text from the base name
+    baseChannelName = name.substring(0, qualityMatch.index).trim();
   }
   
+  // If baseChannelName became empty, it means the original name was just the quality or quality + suffix.
+  // Try to reconstruct a meaningful baseChannelName or default to the original name if all else fails.
   if (baseChannelName === '' && name.includes(quality || '')) {
-      baseChannelName = name.replace(quality || '', '').trim();
+      baseChannelName = name.replace(quality || '', '').replace(/\(\)/, '').trim();
   }
   if (baseChannelName === '') baseChannelName = name; 
 
@@ -31,18 +35,21 @@ export function extractChannelDetails(name: string): { baseChannelName: string; 
  * Example: "Batalha das Solteiras S01E06" -> { seriesTitle: "Batalha das Solteiras", seasonNumber: 1, episodeNumber: 6 }
  */
 export function extractSeriesDetails(title: string): { seriesTitle: string; seasonNumber?: number; episodeNumber?: number } {
-  const seriesPattern = /^(.*?)(?:s(\d{1,2})e(\d{1,2})|season\s*(\d{1,2})\s*episode\s*(\d{1,2})|\s-\sS(\d{1,2})\sE(\d{1,2}))(?:\s*-\s*(.*)|$|\s*:?\s*(.*))/i;
+  const seriesPattern = /^(.*?)(?:s(\d{1,3})e(\d{1,3})|season\s*(\d{1,3})\s*episode\s*(\d{1,3})|\s-\sS(\d{1,3})\sE(\d{1,3}))(?:\s*-\s*(.*)|$|\s*:?\s*(.*))/i;
   const match = title.match(seriesPattern);
 
   if (match) {
     const seriesTitle = (match[1] || '').trim();
-    const seasonNumber = parseInt(match[2] || match[4] || match[6], 10);
-    const episodeNumber = parseInt(match[3] || match[5] || match[7], 10);
+    const seasonStr = match[2] || match[4] || match[6];
+    const episodeStr = match[3] || match[5] || match[7];
+    
+    const seasonNumber = seasonStr ? parseInt(seasonStr, 10) : undefined;
+    const episodeNumber = episodeStr ? parseInt(episodeStr, 10) : undefined;
     
     return {
-      seriesTitle: seriesTitle || title.split(/s\d{1,2}e\d{1,2}/i)[0].trim() || title,
-      seasonNumber: isNaN(seasonNumber) ? undefined : seasonNumber,
-      episodeNumber: isNaN(episodeNumber) ? undefined : episodeNumber,
+      seriesTitle: seriesTitle || title.split(/s\d{1,3}e\d{1,3}/i)[0].trim() || title,
+      seasonNumber: isNaN(seasonNumber as number) ? undefined : seasonNumber,
+      episodeNumber: isNaN(episodeNumber as number) ? undefined : episodeNumber,
     };
   }
   // If no SxxExx pattern, it might be a movie mistaken for a series, or series title without episode info
@@ -62,32 +69,30 @@ export function extractMovieYear(title: string): number | undefined {
     return undefined;
 }
 
-
 /**
- * Normalizes group titles.
- * - Removes "|" and extra spaces
- * - Converts to uppercase
- * - Specific prefixes for item types:
- *   - Channels: Prefixes with "CANAIS " if not already present.
- *   - Movies: Removes "FILMES ", "MOVIES ", "FILME " prefixes.
- *   - Series: Removes "SERIES ", "SERIE ", "TV SHOWS " prefixes.
+ * Normalizes group titles for consistent categorization.
+ * - Converts to uppercase.
+ * - Removes "CANAL |", "CANAIS |", "FILMES |", "SÉRIES |" prefixes and similar variations.
+ * - Trims extra spaces.
+ * - Specific handling for item types can be added if needed, but for now, focuses on general cleanup.
  */
-export function normalizeGroupTitle(rawGroupTitle: string | undefined, itemType?: PlaylistItemType): string | undefined {
+export function normalizeGroupTitle(rawGroupTitle: string | undefined, itemType?: PlaylistItem['itemType']): string | undefined {
   if (!rawGroupTitle) return undefined;
 
-  let normalized = rawGroupTitle.replace(/\|/g, ' ').replace(/\s+/g, ' ').toUpperCase().trim();
+  let normalized = rawGroupTitle.toUpperCase().trim();
 
-  if (itemType === 'channel') {
-    if (!normalized.startsWith('CANAIS ') && !normalized.startsWith('CANAL ')) {
-      normalized = `CANAIS ${normalized}`;
-    }
-  } else if (itemType === 'movie') {
-    normalized = normalized.replace(/^(FILMES|MOVIES|FILME)\s*/i, '').trim();
-  } else if (itemType === 'series_episode') {
-    normalized = normalized.replace(/^(SERIES|SERIE|TV SHOWS)\s*/i, '').trim();
-  }
-  return normalized;
+  // Remove common prefixes and separators used in group titles
+  normalized = normalized.replace(/^(CANAIS|CANAL|FILMES|SÉRIES|SERIES|MOVIES|TV SHOWS)\s*(\||-)?\s*/i, '');
+  normalized = normalized.replace(/\s*(\||-)\s*$/, ''); // Remove trailing separators
+  normalized = normalized.replace(/\s+/g, ' ').trim(); // Normalize spaces
+
+  // Optional: Re-add a generic prefix based on itemType if desired, for example:
+  // if (itemType === 'channel' && !normalized.startsWith('CANAIS')) {
+  //   normalized = `CANAIS ${normalized}`;
+  // }
+  return normalized || rawGroupTitle.trim(); // Fallback to original trimmed if normalization results in empty
 }
+
 
 /**
  * Parses M3U content string into a list of structured playlist items.
@@ -122,69 +127,94 @@ export function parseM3U(m3uString: string, playlistDbId: string, limit?: number
       }
     } else if (trimmedLine && !trimmedLine.startsWith('#')) {
       const streamUrl = trimmedLine;
-      const m3uTitle = currentTitleLine; // Title after the comma in #EXTINF
-      const tvgName = currentRawAttributes['tvg-name'] || m3uTitle; // Prefer tvg-name, fallback to M3U title
+      const m3uTitle = currentTitleLine; 
+      const tvgName = currentRawAttributes['tvg-name'] || m3uTitle; 
       const originalGroupTitle = currentRawAttributes['group-title'];
+      
       const lowerUrl = streamUrl.toLowerCase();
-      const lowerTvgName = tvgName.toLowerCase();
-      const lowerGroupTitle = originalGroupTitle?.toLowerCase() || '';
+      const lowerTvgName = normalizeForComparison(tvgName); // Normalize for pattern matching
+      const lowerGroupTitle = normalizeForComparison(originalGroupTitle);
 
-      let itemType: PlaylistItemType | undefined = undefined;
+      let itemType: PlaylistItem['itemType'] | undefined = undefined;
 
       // 1. Determine Item Type based on new rules
       if (lowerUrl.endsWith('.ts') || lowerGroupTitle.includes('canal') || lowerTvgName.includes('24h')) {
         itemType = 'channel';
-      } else if (lowerUrl.endsWith('.mp4')) { // Common for movies and series episodes
-        if (lowerTvgName.match(/s\d{1,2}e\d{1,2}/i) || lowerGroupTitle.includes('serie')) {
+      } else if (lowerUrl.includes('.mp4') || lowerUrl.includes('.mkv') || lowerUrl.includes('.avi')) { // Common video extensions
+        if (tvgName.match(/s\d{1,3}e\d{1,3}/i)) { // Strong indicator for series
           itemType = 'series_episode';
-        } else if (lowerGroupTitle.includes('filme')) {
-          itemType = 'movie';
+        } else {
+          // If tvg-name looks like a channel (e.g., "ESPN HD", "AMC FHD")
+          const { quality: extractedQualityFromName } = extractChannelDetails(tvgName);
+          const isLikelyChannelName = extractedQualityFromName || 
+                                     (tvgName.toUpperCase() === tvgName && tvgName.length < 15 && !tvgName.includes('(') && !tvgName.match(/\d{4}/)); // Heuristic for channel-like names
+
+          if (isLikelyChannelName && !tvgName.match(/s\d{1,3}e\d{1,3}/i)) {
+            itemType = 'channel';
+          } else if (lowerGroupTitle.includes('filme')) {
+            itemType = 'movie';
+          } else if (lowerGroupTitle.includes('serie')) { // Weaker indicator if SxxExx didn't match
+            itemType = 'series_episode';
+          } else if (lowerGroupTitle.includes('documentario')) { // Example for specific group titles
+             itemType = 'movie'; // Or 'series_episode' if applicable
+          } else {
+            // Fallback: if it has a year in parentheses, likely a movie. Otherwise, could be a series without SxxExx.
+            // Or if group-title is very generic, might be a channel if tvg-name is short.
+            if (extractMovieYear(tvgName) !== undefined) {
+                itemType = 'movie';
+            } else if (isLikelyChannelName) { // Re-check for channel if group title was too generic
+                itemType = 'channel';
+            } else {
+                 // If still undecided, and no SxxExx, and group title isn't specific, it's more likely a movie or a series title without episode info.
+                 // Let's default to movie if it's not a series episode and not clearly a channel
+                 itemType = 'movie'; 
+            }
+          }
         }
       }
-      // Fallback if still undefined (e.g. .mkv, .avi, or other M3U formats)
+      // Fallback if still undefined based on stream type not being .ts or video-like
       if (!itemType) {
-        if (lowerTvgName.match(/s\d{1,2}e\d{1,2}/i) || lowerGroupTitle.includes('serie')) {
+        if (tvgName.match(/s\d{1,3}e\d{1,3}/i) || lowerGroupTitle.includes('serie')) {
             itemType = 'series_episode';
         } else if (lowerGroupTitle.includes('filme')) {
             itemType = 'movie';
         } else if (lowerGroupTitle.includes('canal') || lowerTvgName.includes('24h')) {
             itemType = 'channel';
         } else {
-            // Default or further heuristics can be added. For now, skip if type is truly unknown.
-            // Or default to 'channel' if it has a group title, 'movie' if not.
-            itemType = originalGroupTitle ? 'channel' : 'movie'; // A somewhat arbitrary fallback
+            itemType = 'movie'; // Defaulting to movie if no other clues
         }
       }
 
 
       const item: Partial<PlaylistItem> = {
         playlistDbId,
-        title: tvgName, // Use tvg-name as the primary title, or m3u title if tvg-name is missing
+        title: tvgName, 
         streamUrl,
         logoUrl: currentRawAttributes['tvg-logo'],
         originalGroupTitle: originalGroupTitle,
         tvgId: currentRawAttributes['tvg-id'],
-        tvgName: currentRawAttributes['tvg-name'], // Storing raw tvg-name
+        tvgName: currentRawAttributes['tvg-name'], 
         itemType,
       };
       
+      // Group title normalization happens *after* item type detection, as type might influence normalization
       item.groupTitle = normalizeGroupTitle(originalGroupTitle, item.itemType);
 
       if (item.itemType === 'channel') {
         const { baseChannelName, quality } = extractChannelDetails(tvgName);
         item.baseChannelName = baseChannelName;
         item.quality = quality;
-        item.genre = item.groupTitle; // For channels, genre can be the group
+        item.genre = item.groupTitle; 
       } else if (item.itemType === 'series_episode') {
         const { seriesTitle, seasonNumber, episodeNumber } = extractSeriesDetails(tvgName);
         item.seriesTitle = seriesTitle;
         item.seasonNumber = seasonNumber;
         item.episodeNumber = episodeNumber;
-        // item.title remains tvgName (which is already episode specific like "Batalha das Solteiras S01E06")
-        item.genre = item.groupTitle; // For series, genre can be the group title
+        item.genre = item.groupTitle; 
+        item.year = extractMovieYear(tvgName); // Series might also have a release year in their "episode" M3U title
       } else if (item.itemType === 'movie') {
         item.year = extractMovieYear(tvgName);
-        item.genre = item.groupTitle; // For movies, genre can be the group title
+        item.genre = item.groupTitle; 
       }
       
       if (item.streamUrl && item.title && item.itemType) {
