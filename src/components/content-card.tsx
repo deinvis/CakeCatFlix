@@ -17,7 +17,7 @@ export function ContentCard({
   type, 
   genre, 
   dataAiHint, 
-  streamUrl, 
+  // streamUrl, // Not directly used for navigation decision now
   qualities,
   sourceCount,
   seriesId 
@@ -29,20 +29,19 @@ export function ContentCard({
 
   const handleClick = () => {
     if (type === 'movie') {
-      console.log(`Navigating to player for movie: ${title} (ID: ${id})`);
       // ID for movie is its DB ID, which should be a number, but router expects string
       router.push(`/app/player/movie/${id.toString()}`); 
     } else if (type === 'series') {
-      const navId = seriesId || id; 
-      console.log(`Navigating to player/details for series: ${title} (SeriesID: ${navId})`);
-      router.push(`/app/player/series/${navId.toString()}`);
+      // For series, 'id' from ContentItemForCard should be the SeriesItem.id from DB (which is a number)
+      // 'seriesId' prop on ContentItemForCard is this SeriesItem.id
+      const navigationId = seriesId || id; // Prefer seriesId if explicitly passed
+      router.push(`/app/player/series/${navigationId.toString()}`);
     } else if (type === 'channel') {
       // For an aggregated channel, 'id' is the baseChannelName (string)
-      console.log(`Navigating to player/details for channel: ${title} (BaseName: ${id})`);
-      router.push(`/app/player/channel/${encodeURIComponent(id)}`); // Ensure baseChannelName is URL encoded
+      router.push(`/app/player/channel/${encodeURIComponent(id)}`); 
     } else {
-      console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined or streamUrl missing.`);
-      alert(`Details for: ${title}\n(Player/Detail page not implemented for this type or missing URL)`);
+      console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined.`);
+      // alert(`Details for: ${title}\n(Player/Detail page not implemented for this type or missing URL)`);
     }
   };
 
@@ -94,6 +93,11 @@ export function ContentCard({
               {type === 'channel' && qualities && qualities.length > 0 && (!sourceCount || sourceCount === 1) && (
                  <Badge variant="outline" className="text-xs">
                   {qualities.join('/')}
+                </Badge>
+              )}
+               {type === 'series' && sourceCount && sourceCount > 0 && (
+                <Badge variant="outline" className="text-xs" title={`${sourceCount} ${sourceCount === 1 ? 'episódio' : 'episódios'}`}>
+                  <Clapperboard className="h-3 w-3 mr-1" /> {sourceCount} {sourceCount === 1 ? 'Ep.' : 'Eps.'}
                 </Badge>
               )}
             </div>

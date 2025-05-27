@@ -32,7 +32,7 @@ function getDb(): Promise<IDBDatabase> {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
         const oldVersion = event.oldVersion;
-        console.log(`Upgrading DB from version ${oldVersion} to ${DB_VERSION}`);
+        console.log(`DB: Upgrading DB from version ${oldVersion} to ${DB_VERSION}`);
 
         if (!db.objectStoreNames.contains(PLAYLIST_METADATA_STORE)) {
           console.log(`DB: Creating store ${PLAYLIST_METADATA_STORE}`);
@@ -44,7 +44,7 @@ function getDb(): Promise<IDBDatabase> {
           db.deleteObjectStore(LEGACY_PLAYLIST_ITEMS_STORE);
         }
 
-        const ensureStoreAndIndices = (storeName: string, keyPath: string, indices: { name: string, keyPath: string | string[], options?: IDBIndexParameters }[]) => {
+        const ensureStoreAndIndices = (storeName: string, keyPath: string | undefined, indices: { name: string, keyPath: string | string[], options?: IDBIndexParameters }[]) => {
           let store: IDBObjectStore;
           if (!db.objectStoreNames.contains(storeName)) {
             console.log(`DB: Creating store ${storeName}`);
@@ -79,7 +79,7 @@ function getDb(): Promise<IDBDatabase> {
           { name: 'year_idx', keyPath: 'year' },
           { name: 'title_idx', keyPath: 'title'},
           { name: 'playlist_genre_idx', keyPath: ['playlistDbId', 'genre'] },
-          { name: 'playlist_itemType_genre_idx', keyPath: ['playlistDbId', 'itemType', 'genre'], options: { multiEntry: true } },
+          { name: 'playlist_title_year_idx', keyPath: ['playlistDbId', 'title', 'year'] },
         ]);
         
         ensureStoreAndIndices(SERIES_STORE, 'id', [
@@ -95,6 +95,7 @@ function getDb(): Promise<IDBDatabase> {
           { name: 'seriesDbId_idx', keyPath: 'seriesDbId' },
           { name: 'title_idx', keyPath: 'title'},
           { name: 'playlist_series_season_episode_idx', keyPath: ['playlistDbId', 'seriesDbId', 'seasonNumber', 'episodeNumber'] },
+          { name: 'seriesDbId_season_episode_idx', keyPath: ['seriesDbId', 'seasonNumber', 'episodeNumber'] },
         ]);
       };
 
@@ -144,12 +145,10 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
         reject(transaction.error || new Error("Transaction failed."));
     };
     
-    // This oncomplete will be called AFTER all items are processed and metadata is updated
     transaction.oncomplete = () => {
       resolve();
     };
     
-    // Pre-process to identify all unique series
     for (const item of items) {
         if (item.itemType === 'series_episode' && item.seriesTitle) {
             if (!uniqueSeriesInPlaylist.has(item.seriesTitle)) {
@@ -176,7 +175,6 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
         }
     }
 
-    // Batch add series items and get their IDs
     const seriesAddPromises = Array.from(uniqueSeriesInPlaylist.values()).map(seriesData =>
         new Promise<void>((res, rej) => {
             const addSeriesRequest = seriesStore.add(seriesData.item);
@@ -197,7 +195,6 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
         return;
     }
 
-    // Now add individual items
     const itemAddOperations: Promise<void>[] = items.map(item => new Promise<void>((resItem, rejItem) => {
         item.playlistDbId = metadata.id;
         let request: IDBRequest;
@@ -248,7 +245,6 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
     try {
       await Promise.all(itemAddOperations);
       
-      // All items added, now update metadata
       metadata.itemCount = items.length;
       metadata.channelCount = channelCount;
       metadata.movieCount = movieCount;
@@ -261,17 +257,12 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
       const metaRequest = metadataStore.put(metadata);
       metaRequest.onerror = () => {
           console.error("Error updating playlist metadata after items processed:", metaRequest.error);
-          // Don't reject here as the transaction might be completing. The error is logged.
-          // If transaction aborts, the outer onabort will catch it.
       };
-      // The transaction will auto-complete. If metaRequest fails, it might still commit prior item additions.
-      // For full atomicity, this put should be part of the item adding loop, or handled differently.
-      // However, for now, this structure is common.
 
     } catch (error) {
         console.error("Error batch adding channel/movie/episode items:", error);
         if (transaction.error === null && transaction.idbRequest && transaction.idbRequest.readyState !== 'done') transaction.abort();
-        reject(error); // This reject will be caught by the outer Promise chain if transaction hasn't aborted.
+        reject(error); 
     }
   });
 }
@@ -391,30 +382,26 @@ export async function getPlaylistItems(
       const range = IDBKeyRange.only(playlistDbId);
 
       const items: any[] = [];
-      let advancedOnce = false; 
+      let advancedCount = 0; 
+      let itemsAdded = 0;
       
       const cursorRequest = index.openCursor(range);
 
       cursorRequest.onsuccess = (event) => {
           const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
           if (cursor) {
-              if (offset > 0 && !advancedOnce) {
-                  advancedOnce = true;
-                  try {
-                      cursor.advance(offset);
-                  } catch (e) {
-                      console.warn("Failed to advance cursor by offset (offset might be too large):", e);
-                      resolve(items);
-                      return;
-                  }
+              if (offset > 0 && advancedCount < offset) {
+                  advancedCount++;
+                  cursor.continue();
                   return;
               }
 
-              if (limit && items.length >= limit) {
+              if (limit && itemsAdded >= limit) {
                   resolve(items);
                   return;
               }
               items.push(cursor.value);
+              itemsAdded++;
               cursor.continue();
           } else {
               resolve(items);
@@ -430,7 +417,7 @@ export async function getPlaylistItems(
 export async function getPlaylistItemsByGroup(
   playlistDbId: string,
   groupTitle: string,
-  itemType: 'movie' | 'series' | 'channel',
+  itemType: 'movie' | 'series' | 'channel', // itemType is now mandatory
   limit?: number,
   offset: number = 0
 ): Promise<any[]> {
@@ -453,7 +440,8 @@ export async function getPlaylistItemsByGroup(
             indexName = 'playlist_groupTitle_idx'; 
             break;
         default:
-            return Promise.reject(new Error("Invalid itemType for getPlaylistItemsByGroup. Must be 'movie', 'series', or 'channel'."));
+            // Should not happen if itemType is enforced by TypeScript
+            return Promise.reject(new Error("Invalid itemType for getPlaylistItemsByGroup."));
     }
 
     return new Promise((resolve, reject) => {
@@ -462,28 +450,24 @@ export async function getPlaylistItemsByGroup(
         const index = store.index(indexName);
 
         const items: any[] = [];
-        let advancedOnce = false;
+        let advancedCount = 0;
+        let itemsAdded = 0;
 
         const cursorRequest = index.openCursor(keyRangeValue);
         cursorRequest.onsuccess = (event) => {
             const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
             if (cursor) {
-                if (offset > 0 && !advancedOnce) {
-                    advancedOnce = true;
-                    try {
-                        cursor.advance(offset);
-                    } catch (e) {
-                        console.warn("Failed to advance cursor by offset:", e);
-                        resolve(items);
-                        return;
-                    }
-                    return;
+                if (offset > 0 && advancedCount < offset) {
+                  advancedCount++;
+                  cursor.continue();
+                  return;
                 }
-                if (limit && items.length >= limit) {
+                if (limit && itemsAdded >= limit) {
                     resolve(items);
                     return;
                 }
                 items.push(cursor.value);
+                itemsAdded++;
                 cursor.continue();
             } else {
                 resolve(items);
@@ -608,7 +592,7 @@ export async function getAllGenresForPlaylist(
             }
             cursor.continue();
         } else {
-            resolve(Array.from(uniqueValues).sort());
+            resolve(Array.from(uniqueValues).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: 'base'})));
         }
     };
     request.onerror = () => {
@@ -618,7 +602,6 @@ export async function getAllGenresForPlaylist(
   });
 }
 
-// Fetches a single ChannelItem by its database ID
 export async function getChannelItemById(id: number): Promise<ChannelItem | undefined> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
@@ -630,7 +613,6 @@ export async function getChannelItemById(id: number): Promise<ChannelItem | unde
     });
 }
 
-// Fetches a single MovieItem by its database ID
 export async function getMovieItemById(id: number): Promise<MovieItem | undefined> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
@@ -642,7 +624,52 @@ export async function getMovieItemById(id: number): Promise<MovieItem | undefine
     });
 }
 
-// Fetches a single SeriesItem by its database ID
+export async function getMovieItemsByTitleYearAcrossPlaylists(
+    title: string,
+    year: number | undefined,
+    activePlaylistIds: string[]
+): Promise<MovieItem[]> {
+    if (activePlaylistIds.length === 0) return [];
+    const db = await getDb();
+    const transaction = db.transaction(MOVIES_STORE, 'readonly');
+    const store = transaction.objectStore(MOVIES_STORE);
+    const index = store.index('playlist_title_year_idx');
+
+    const allMatchingMovies: MovieItem[] = [];
+
+    const promises = activePlaylistIds.map(playlistDbId => {
+        return new Promise<void>((resolvePlaylist, rejectPlaylist) => {
+            // If year is undefined, we might need a different query or to iterate more.
+            // For simplicity now, this query assumes year is part of the index effectively.
+            // A more robust query might involve fetching by title and then client-side filtering by year if year isn't always present or reliably indexed.
+            const keyRange = year
+                ? IDBKeyRange.only([playlistDbId, title, year])
+                : IDBKeyRange.bound([playlistDbId, title, -Infinity], [playlistDbId, title, Infinity]); // Attempt to get all years for title
+
+            const request = index.getAll(keyRange); // Using getAll for potentially multiple matches (though index should be unique per playlist)
+            
+            request.onsuccess = (event) => {
+                const moviesInPlaylist = (event.target as IDBRequest).result as MovieItem[];
+                moviesInPlaylist.forEach(movie => {
+                     // Double check title and year client-side if year was originally undefined for query
+                    if (movie.title === title && (year === undefined || movie.year === year)) {
+                         allMatchingMovies.push(movie);
+                    }
+                });
+                resolvePlaylist();
+            };
+            request.onerror = () => {
+                console.error(`Error fetching movies for title "${title}" in playlist ${playlistDbId}:`, request.error);
+                rejectPlaylist(request.error);
+            };
+        });
+    });
+
+    await Promise.all(promises);
+    return allMatchingMovies;
+}
+
+
 export async function getSeriesItemById(id: string | number): Promise<SeriesItem | undefined> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
@@ -658,7 +685,6 @@ export async function getSeriesItemById(id: string | number): Promise<SeriesItem
     });
 }
 
-// Fetches all EpisodeItems for a given seriesDbId from a specific playlist
 export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: number): Promise<EpisodeItem[]> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
@@ -666,7 +692,7 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
         const store = transaction.objectStore(EPISODES_STORE);
         const index = store.index('playlist_series_season_episode_idx');
         const lowerBound = [playlistDbId, seriesDbId];
-        const upperBound = [playlistDbId, seriesDbId, [], []]; 
+        const upperBound = [playlistDbId, seriesDbId, '\uffff', '\uffff']; 
 
         const range = IDBKeyRange.bound(lowerBound, upperBound, false, false);
 
@@ -696,7 +722,50 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
 }
 
 
-// New function to get all channel items matching a baseChannelName across specified playlists
+export async function getEpisodesForSeriesAcrossPlaylists(
+  seriesDbId: number, // This is the SeriesItem.id
+  activePlaylistIds: string[]
+): Promise<EpisodeItem[]> {
+  if (activePlaylistIds.length === 0) return [];
+  const db = await getDb();
+  const transaction = db.transaction(EPISODES_STORE, 'readonly');
+  const store = transaction.objectStore(EPISODES_STORE);
+  // We need an index on seriesDbId that we can iterate through
+  // and then filter by playlistDbId client-side, or a compound index.
+  // Let's assume 'seriesDbId_season_episode_idx' can be used, or just 'seriesDbId_idx'
+  const index = store.index('seriesDbId_idx'); 
+
+  const allMatchingEpisodes: EpisodeItem[] = [];
+
+  return new Promise((resolve, reject) => {
+    const request = index.openCursor(IDBKeyRange.only(seriesDbId));
+    request.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        const episode = cursor.value as EpisodeItem;
+        // Filter by active playlists
+        if (activePlaylistIds.includes(episode.playlistDbId)) {
+          allMatchingEpisodes.push(episode);
+        }
+        cursor.continue();
+      } else {
+        // Sort episodes once all are collected
+        allMatchingEpisodes.sort((a, b) => {
+          const seasonCompare = (a.seasonNumber ?? Infinity) - (b.seasonNumber ?? Infinity);
+          if (seasonCompare !== 0) return seasonCompare;
+          return (a.episodeNumber ?? Infinity) - (b.episodeNumber ?? Infinity);
+        });
+        resolve(allMatchingEpisodes);
+      }
+    };
+    request.onerror = () => {
+      console.error(`Error fetching episodes for seriesDbId ${seriesDbId}:`, request.error);
+      reject(request.error);
+    };
+  });
+}
+
+
 export async function getChannelItemsByBaseNameAcrossPlaylists(
   baseChannelName: string,
   activePlaylistIds: string[]
@@ -709,7 +778,6 @@ export async function getChannelItemsByBaseNameAcrossPlaylists(
 
   const allMatchingChannels: ChannelItem[] = [];
 
-  // Create a promise for each playlist ID to fetch channels
   const promises = activePlaylistIds.map(playlistDbId => {
     return new Promise<void>((resolvePlaylist, rejectPlaylist) => {
       const keyRange = IDBKeyRange.only([playlistDbId, baseChannelName]);
@@ -720,7 +788,7 @@ export async function getChannelItemsByBaseNameAcrossPlaylists(
           allMatchingChannels.push(cursor.value as ChannelItem);
           cursor.continue();
         } else {
-          resolvePlaylist(); // Finished for this playlist
+          resolvePlaylist(); 
         }
       };
       request.onerror = () => {
