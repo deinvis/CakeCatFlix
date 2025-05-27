@@ -18,8 +18,14 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
       {
+        protocol: 'http',
+        hostname: '**', // Allow any hostname over HTTP
+        port: '',
+        pathname: '/**',
+      },
+      {
         protocol: 'https',
-        hostname: 'www2.camara.leg.br',
+        hostname: '**', // Allow any hostname over HTTPS
         port: '',
         pathname: '/**',
       },
