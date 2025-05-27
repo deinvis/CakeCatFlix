@@ -8,19 +8,19 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type SeriesItem, type EpisodeItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
+// Removed Input import as it's not used here currently
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
-// Helper to transform SeriesItem (which represents a unique series) to ContentItemForCard
 const transformSeriesItemToCardItem = (series: SeriesItem, episodeCount: number): ContentItemForCard => ({
-  id: series.id!.toString(), // Use the SeriesItem's own DB ID
+  id: series.id!.toString(),
   title: series.title,
   imageUrl: series.logoUrl,
   type: 'series',
   genre: series.genre,
   dataAiHint: `series ${series.title || series.genre || ''}`.substring(0, 50).trim().toLowerCase(),
-  seriesId: series.id!.toString(), // The seriesId for navigation is the SeriesItem's DB ID
-  sourceCount: episodeCount, // Represents number of episodes
+  seriesId: series.id!.toString(),
+  sourceCount: episodeCount,
 });
 
 interface GroupedSeries {
@@ -29,41 +29,40 @@ interface GroupedSeries {
 }
 
 export default function SeriesPage() {
-  const [groupedSeriesItems, setGroupedSeriesItems] = useState<GroupedSeries[]>([]);
+  const [allGroupedSeriesItems, setAllGroupedSeriesItems] = useState<GroupedSeries[]>([]);
+  const [displayedGroupedSeriesItems, setDisplayedGroupedSeriesItems] = useState<GroupedSeries[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // Keep for future use or consistency
 
   const fetchAndGroupSeries = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
     setIsLoading(true);
     try {
-      // Fetch all unique SeriesItems for the playlist
       const uniqueSeriesFromDB = await getPlaylistItems(playlistId, 'series') as SeriesItem[];
-
-      // Fetch all episodes to correctly count them for each series
       const allEpisodesFromDB = await getPlaylistItems(playlistId, 'episode') as EpisodeItem[];
       const episodeCounts = new Map<number, number>();
       allEpisodesFromDB.forEach(ep => {
         episodeCounts.set(ep.seriesDbId, (episodeCounts.get(ep.seriesDbId) || 0) + 1);
       });
-
       const uniqueSeriesCardItems = uniqueSeriesFromDB.map(series =>
         transformSeriesItemToCardItem(series, episodeCounts.get(series.id!) || 0)
       );
-
       const genres = await getAllGenresForPlaylist(playlistId, 'series');
-
       const groups: GroupedSeries[] = genres.map(genre => ({
         genre: genre,
         items: uniqueSeriesCardItems.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
       })).filter(group => group.items.length > 0);
 
-      setGroupedSeriesItems(groups.sort((a,b) => a.genre.localeCompare(b.genre)));
+      const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
+      setAllGroupedSeriesItems(sortedGroups);
+      setDisplayedGroupedSeriesItems(sortedGroups); // Update displayed items
 
     } catch (error) {
       console.error("Failed to fetch or group series items:", error);
-      setGroupedSeriesItems([]);
+      setAllGroupedSeriesItems([]);
+      setDisplayedGroupedSeriesItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -73,6 +72,7 @@ export default function SeriesPage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
+      setSearchTerm(''); // Reset search term on init
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
@@ -82,22 +82,39 @@ export default function SeriesPage() {
           await fetchAndGroupSeries(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setGroupedSeriesItems([]);
+          setAllGroupedSeriesItems([]);
+          setDisplayedGroupedSeriesItems([]);
+          setIsLoading(false);
         }
       } catch (error) {
         console.error("Failed to initialize series page:", error);
         setHasPlaylistsConfigured(false);
-      } finally {
-        // setIsLoading(false); // fetchAndGroupSeries handles this
+        setIsLoading(false);
       }
     }
     initialize();
   }, [fetchAndGroupSeries]);
 
-  if (hasPlaylistsConfigured === null || (isLoading && groupedSeriesItems.length === 0)) {
+   // Example filter effect if search is added to this page later
+   useEffect(() => {
+    if (isLoading) return;
+    if (!searchTerm) {
+      setDisplayedGroupedSeriesItems(allGroupedSeriesItems);
+      return;
+    }
+    const filtered = allGroupedSeriesItems.filter(group =>
+      group.genre.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    setDisplayedGroupedSeriesItems(filtered);
+  }, [searchTerm, allGroupedSeriesItems, isLoading]);
+
+
+  if (hasPlaylistsConfigured === null || (isLoading && allGroupedSeriesItems.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Séries de TV" description="Assista suas séries favoritas e descubra novas." />
+        {/* Optional: Skeleton for search bar */}
+        {/* <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" /> */}
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="mb-8 md:mb-12">
             <Skeleton className="h-8 w-1/4 mb-4 rounded-md" />
@@ -121,9 +138,10 @@ export default function SeriesPage() {
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Séries de TV" description="Assista suas séries favoritas e descubra novas." />
+      {/* Search input could be added here if desired for this page */}
       {hasPlaylistsConfigured ? (
-        groupedSeriesItems.length > 0 ? (
-          groupedSeriesItems.map(group => (
+        displayedGroupedSeriesItems.length > 0 ? (
+          displayedGroupedSeriesItems.map(group => (
             <ContentGroupRow
               key={group.genre}
               title={`${group.genre} (${group.items.length})`}
@@ -133,6 +151,8 @@ export default function SeriesPage() {
             />
           ))
         ) : (
+          !isLoading && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum gênero de série encontrado para "{searchTerm}".</p>
+        ) || (
           !isLoading && <p className="text-muted-foreground text-center py-8">Nenhuma série encontrada nas suas playlists.</p>
         )
       ) : (
@@ -141,3 +161,5 @@ export default function SeriesPage() {
     </div>
   );
 }
+
+    

@@ -4,30 +4,29 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
-import { ContentGroupRow } from '@/components/content-group-row'; // Changed from ContentGrid
+import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type ChannelItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input'; // Import Input
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
-// Helper to transform a list of ChannelItems (for one baseChannelName) to a single ContentItemForCard
 const aggregateChannelItemsToCard = (baseName: string, items: ChannelItem[]): ContentItemForCard => {
   if (items.length === 0) {
-    // Should not happen if called correctly, but handle defensively
     return {
       id: baseName,
       title: baseName,
       type: 'channel',
       dataAiHint: `channel ${baseName}`.substring(0, 50).trim().toLowerCase(),
-      imageUrl: `https://placehold.co/300x450.png`, // Default placeholder
+      imageUrl: `https://placehold.co/300x450.png`,
     };
   }
-  const representativeItem = items[0]; // Use first item for general info like logo
+  const representativeItem = items[0];
   const uniqueQualities = Array.from(new Set(items.map(i => i.quality).filter(Boolean) as string[])).sort();
 
   return {
-    id: baseName, // ID for aggregated card is the baseChannelName
+    id: baseName,
     title: baseName,
     imageUrl: representativeItem.logoUrl,
     type: 'channel',
@@ -39,26 +38,26 @@ const aggregateChannelItemsToCard = (baseName: string, items: ChannelItem[]): Co
 
 interface GroupedChannels {
   groupTitle: string;
-  items: ContentItemForCard[]; // These are aggregated channel cards
+  items: ContentItemForCard[];
 }
 
 export default function ChannelsPage() {
-  const [groupedChannelItems, setGroupedChannelItems] = useState<GroupedChannels[]>([]);
+  const [allGroupedChannelItems, setAllGroupedChannelItems] = useState<GroupedChannels[]>([]);
+  const [displayedGroupedChannelItems, setDisplayedGroupedChannelItems] = useState<GroupedChannels[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // State for search term
 
   const fetchAndGroupChannels = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
     setIsLoading(true);
     try {
       const rawChannelItemsFromDB = await getPlaylistItems(playlistId, 'channel') as ChannelItem[];
-      const groupTitles = await getAllGenresForPlaylist(playlistId, 'channel'); // Gets unique groupTitles for channels
+      const groupTitles = await getAllGenresForPlaylist(playlistId, 'channel');
 
       const groups: GroupedChannels[] = groupTitles.map(groupTitle => {
         const channelsInGroup = rawChannelItemsFromDB.filter(ch => ch.groupTitle === groupTitle);
-
-        // Aggregate channels within this group by baseChannelName
         const channelAggregates = new Map<string, ChannelItem[]>();
         channelsInGroup.forEach(item => {
           if (item.baseChannelName) {
@@ -68,23 +67,24 @@ export default function ChannelsPage() {
             channelAggregates.get(item.baseChannelName)!.push(item);
           }
         });
-
         const aggregatedCardsForGroup: ContentItemForCard[] = [];
         channelAggregates.forEach((items, baseName) => {
           aggregatedCardsForGroup.push(aggregateChannelItemsToCard(baseName, items));
         });
-        
         return {
           groupTitle: groupTitle,
           items: aggregatedCardsForGroup.sort((a,b) => a.title.localeCompare(b.title))
         };
-      }).filter(group => group.items.length > 0); // Only keep groups with items
+      }).filter(group => group.items.length > 0);
 
-      setGroupedChannelItems(groups.sort((a,b) => a.groupTitle.localeCompare(b.groupTitle)));
+      const sortedGroups = groups.sort((a,b) => a.groupTitle.localeCompare(b.groupTitle));
+      setAllGroupedChannelItems(sortedGroups);
+      setDisplayedGroupedChannelItems(sortedGroups); // Initially display all
 
     } catch (error) {
       console.error("Failed to fetch or group channel items:", error);
-      setGroupedChannelItems([]);
+      setAllGroupedChannelItems([]);
+      setDisplayedGroupedChannelItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -94,6 +94,7 @@ export default function ChannelsPage() {
     async function initializePage() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
+      setSearchTerm('');
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
@@ -103,24 +104,42 @@ export default function ChannelsPage() {
           await fetchAndGroupChannels(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setGroupedChannelItems([]);
+          setAllGroupedChannelItems([]);
+          setDisplayedGroupedChannelItems([]);
+          setIsLoading(false);
         }
       } catch (error) {
         console.error("Failed to initialize channels page:", error);
         setHasPlaylistsConfigured(false);
-      } finally {
-        // setIsLoading(false); // fetchAndGroupChannels handles this
+        setIsLoading(false);
       }
     }
     initializePage();
   }, [fetchAndGroupChannels]);
 
+  // Effect for filtering groups based on searchTerm
+  useEffect(() => {
+    if (isLoading) return;
+    if (!searchTerm) {
+      setDisplayedGroupedChannelItems(allGroupedChannelItems);
+      return;
+    }
+    const filtered = allGroupedChannelItems.filter(group =>
+      group.groupTitle.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    setDisplayedGroupedChannelItems(filtered);
+  }, [searchTerm, allGroupedChannelItems, isLoading]);
 
-  if (hasPlaylistsConfigured === null || (isLoading && groupedChannelItems.length === 0)) {
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+  };
+
+  if (hasPlaylistsConfigured === null || (isLoading && allGroupedChannelItems.length === 0)) {
     return (
       <div className="container mx-auto px-0">
         <PageHeader title="Canais ao Vivo" description="Assista seus canais de TV favoritos."/>
-        {Array.from({ length: 3 }).map((_, i) => ( // Skeleton for 3 rows
+        <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" /> 
+        {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="mb-8 md:mb-12">
             <Skeleton className="h-8 w-1/4 mb-4 rounded-md" />
             <div className="flex overflow-x-auto space-x-4 pb-4">
@@ -143,18 +162,29 @@ export default function ChannelsPage() {
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Canais ao Vivo" description="Assista seus canais de TV favoritos, organizados por categoria."/>
+      <div className="mb-6">
+        <Input
+          type="search"
+          placeholder="Buscar por grupos de canais..."
+          className="w-full sm:w-72"
+          value={searchTerm}
+          onChange={handleSearchChange}
+        />
+      </div>
       {hasPlaylistsConfigured ? (
-        (groupedChannelItems.length > 0) ? (
-          groupedChannelItems.map(group => (
+        (displayedGroupedChannelItems.length > 0) ? (
+          displayedGroupedChannelItems.map(group => (
             <ContentGroupRow
               key={group.groupTitle}
               title={`${group.groupTitle} (${group.items.length})`}
-              items={group.items} // These are aggregated ContentItemForCard
+              items={group.items}
               viewAllLink={`/app/channels/group/${encodeURIComponent(group.groupTitle.toLowerCase())}`}
               itemType="channel"
             />
           ))
         ) : (
+          !isLoading && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum grupo de canais encontrado para "{searchTerm}".</p>
+        ) || (
           !isLoading && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado nas suas playlists configuradas.</p>
         )
       ) : (
@@ -163,3 +193,5 @@ export default function ChannelsPage() {
     </div>
   );
 }
+
+    

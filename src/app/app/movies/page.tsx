@@ -8,10 +8,10 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type MovieItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
+// Removed Input import as it's not used here currently
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
-// Helper to transform MovieItem to ContentItemForCard
 const transformMovieItemToCardItem = (item: MovieItem): ContentItemForCard => ({
   id: item.id!.toString(),
   title: item.title,
@@ -19,7 +19,7 @@ const transformMovieItemToCardItem = (item: MovieItem): ContentItemForCard => ({
   type: 'movie',
   genre: item.genre,
   dataAiHint: `movie ${item.genre || item.title || ''}`.substring(0, 50).trim().toLowerCase(),
-  streamUrl: item.streamUrl, // This will be used for navigation to player
+  streamUrl: item.streamUrl,
 });
 
 interface GroupedMovies {
@@ -28,10 +28,12 @@ interface GroupedMovies {
 }
 
 export default function MoviesPage() {
-  const [groupedMovieItems, setGroupedMovieItems] = useState<GroupedMovies[]>([]);
+  const [allGroupedMovieItems, setAllGroupedMovieItems] = useState<GroupedMovies[]>([]);
+  const [displayedGroupedMovieItems, setDisplayedGroupedMovieItems] = useState<GroupedMovies[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // Keep for future use or consistency
 
   const fetchAndGroupMovies = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
@@ -39,19 +41,21 @@ export default function MoviesPage() {
     try {
       const rawMovieItemsFromDB = await getPlaylistItems(playlistId, 'movie') as MovieItem[];
       const cardItems = rawMovieItemsFromDB.map(transformMovieItemToCardItem);
-
       const genres = await getAllGenresForPlaylist(playlistId, 'movie');
 
       const groups: GroupedMovies[] = genres.map(genre => ({
         genre: genre,
         items: cardItems.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
-      })).filter(group => group.items.length > 0); // Only keep groups with items
+      })).filter(group => group.items.length > 0);
 
-      setGroupedMovieItems(groups.sort((a,b) => a.genre.localeCompare(b.genre)));
+      const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
+      setAllGroupedMovieItems(sortedGroups);
+      setDisplayedGroupedMovieItems(sortedGroups); // Update displayed items
 
     } catch (error) {
       console.error("Failed to fetch or group movie items:", error);
-      setGroupedMovieItems([]);
+      setAllGroupedMovieItems([]);
+      setDisplayedGroupedMovieItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -61,6 +65,7 @@ export default function MoviesPage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
+      setSearchTerm(''); // Reset search term on init
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
@@ -70,22 +75,39 @@ export default function MoviesPage() {
           await fetchAndGroupMovies(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setGroupedMovieItems([]);
+          setAllGroupedMovieItems([]);
+          setDisplayedGroupedMovieItems([]);
+          setIsLoading(false);
         }
       } catch (error) {
         console.error("Failed to initialize movies page:", error);
         setHasPlaylistsConfigured(false);
-      } finally {
-        // setIsLoading(false); // fetchAndGroupMovies handles this
+        setIsLoading(false);
       }
     }
     initialize();
   }, [fetchAndGroupMovies]);
 
-  if (hasPlaylistsConfigured === null || (isLoading && groupedMovieItems.length === 0)) {
+  // Example filter effect if search is added to this page later
+   useEffect(() => {
+    if (isLoading) return;
+    if (!searchTerm) {
+      setDisplayedGroupedMovieItems(allGroupedMovieItems);
+      return;
+    }
+    const filtered = allGroupedMovieItems.filter(group =>
+      group.genre.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    setDisplayedGroupedMovieItems(filtered);
+  }, [searchTerm, allGroupedMovieItems, isLoading]);
+
+
+  if (hasPlaylistsConfigured === null || (isLoading && allGroupedMovieItems.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes." />
+        {/* Optional: Skeleton for search bar */}
+        {/* <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" />  */}
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="mb-8 md:mb-12">
             <Skeleton className="h-8 w-1/4 mb-4 rounded-md" />
@@ -109,9 +131,10 @@ export default function MoviesPage() {
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes organizados por gênero." />
+      {/* Search input could be added here if desired for this page */}
       {hasPlaylistsConfigured ? (
-        groupedMovieItems.length > 0 ? (
-          groupedMovieItems.map(group => (
+        displayedGroupedMovieItems.length > 0 ? (
+          displayedGroupedMovieItems.map(group => (
             <ContentGroupRow
               key={group.genre}
               title={`${group.genre} (${group.items.length})`}
@@ -121,6 +144,8 @@ export default function MoviesPage() {
             />
           ))
         ) : (
+           !isLoading && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum gênero de filme encontrado para "{searchTerm}".</p>
+        ) || (
            !isLoading && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado nas suas playlists.</p>
         )
       ) : (
@@ -129,3 +154,5 @@ export default function MoviesPage() {
     </div>
   );
 }
+
+    
