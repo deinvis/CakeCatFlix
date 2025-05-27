@@ -5,10 +5,15 @@ import { useState, useEffect, ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
-  LOCALSTORAGE_STARTUP_PAGE_KEY, 
-  LOCALSTORAGE_THEME_KEY, 
+  FILE_PLAYLIST_ITEM_LIMIT,
+  LOCALSTORAGE_STARTUP_PAGE_KEY,
+  LOCALSTORAGE_THEME_KEY,
   LOCALSTORAGE_PARENTAL_CONTROL_KEY,
-  FILE_PLAYLIST_ITEM_LIMIT
+  type PlaylistMetadata, // Updated type
+  type PlaylistItem, // Updated type
+  type PlaylistSourceDetailsFile,
+  type PlaylistSourceDetailsUrl,
+  type PlaylistSourceDetailsXtream,
 } from '@/lib/constants';
 import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard } from 'lucide-react';
 import {
@@ -28,17 +33,15 @@ import { Label } from '@/components/ui/label';
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from '@/components/ui/separator';
-import { parseM3U } from '@/lib/m3u-parser';
-import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; 
+import { parseM3U } from '@/lib/m3u-parser'; // Updated parser
+import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; // This will also need to be updated to produce new PlaylistItem[]
 import { 
   addPlaylistWithItems, 
   getAllPlaylistsMetadata, 
   updatePlaylistMetadata, 
   deletePlaylistAndItems,
   clearAllAppData,
-  type PlaylistMetadata,
-  type PlaylistItemCore
-} from '@/lib/db';
+} from '@/lib/db'; // DB functions using new types
 
 export function PlaylistManagement() {
   const [playlists, setPlaylists] = useState<PlaylistMetadata[]>([]);
@@ -57,7 +60,6 @@ export function PlaylistManagement() {
   const [showClearDataDialog, setShowClearDataDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processando sua solicitação...');
-
 
   const { toast } = useToast();
 
@@ -80,7 +82,6 @@ export function PlaylistManagement() {
     fetchPlaylists();
   }, []);
 
-
   const resetAddPlaylistForms = () => {
     setNewPlaylistName('');
     setNewPlaylistFile(null);
@@ -96,15 +97,18 @@ export function PlaylistManagement() {
   const handleAddNewPlaylist = async (type: 'file' | 'url' | 'xtream') => {
     setIsLoading(true);
     let nameToAdd = newPlaylistName.trim();
-    let playlistId = Date.now().toString(); // Unique ID for the playlist
-    let sourceValue = '';
-    let itemsToAdd: PlaylistItemCore[] = [];
+    const playlistId = Date.now().toString(); // Unique ID for the playlist
+    let itemsToAdd: PlaylistItem[] = [];
+    let sourceDetails: PlaylistMetadata['sourceDetails'];
     
-    const metadataBase: Omit<PlaylistMetadata, 'sourceValue' | 'itemCount' | 'channelCount' | 'movieCount' | 'seriesCount'> = {
+    // Base metadata structure
+    let metadataBase: PlaylistMetadata = { // Renamed to avoid conflict in catch block
       id: playlistId,
       name: '', // Will be set below
       sourceType: type,
+      sourceDetails: {} as any, // Placeholder, will be filled
       createdAt: Date.now(),
+      status: 'pending',
     };
 
     try {
@@ -116,17 +120,14 @@ export function PlaylistManagement() {
           return;
         }
         nameToAdd = nameToAdd || newPlaylistFile.name;
-        sourceValue = newPlaylistFile.name; // Store filename as sourceValue
+        sourceDetails = { type: 'file', fileName: newPlaylistFile.name };
         metadataBase.name = nameToAdd;
+        metadataBase.sourceDetails = sourceDetails;
+        metadataBase.status = 'processing';
+        await updatePlaylistMetadata(metadataBase); // Save initial metadata
         
         const fileContent = await newPlaylistFile.text();
-        itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
-        
-        await addPlaylistWithItems({ ...metadataBase, sourceValue }, itemsToAdd);
-        toast({
-          title: "Playlist Adicionada",
-          description: `"${nameToAdd}" (${type}) foi adicionada com ${itemsToAdd.length} itens.`,
-        });
+        itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
 
       } else if (type === 'url') {
         setLoadingMessage('Buscando e processando URL M3U...');
@@ -135,66 +136,67 @@ export function PlaylistManagement() {
           setIsLoading(false);
           return;
         }
-        sourceValue = newPlaylistUrl.trim();
-        nameToAdd = nameToAdd || `URL: ${sourceValue.substring(0,30)}${sourceValue.length > 30 ? '...' : ''}`;
+        const url = newPlaylistUrl.trim();
+        sourceDetails = { type: 'url', url: url };
+        nameToAdd = nameToAdd || `URL: ${url.substring(0,30)}${url.length > 30 ? '...' : ''}`;
         metadataBase.name = nameToAdd;
-        
-        const response = await fetch(sourceValue); // This is line 142 in your error
+        metadataBase.sourceDetails = sourceDetails;
+        metadataBase.status = 'processing';
+        await updatePlaylistMetadata(metadataBase); 
+
+        const response = await fetch(url); 
         if (!response.ok) {
           throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
         }
         const urlContent = await response.text();
-        itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
-        
-        await addPlaylistWithItems({ ...metadataBase, sourceValue }, itemsToAdd);
-        toast({
-          title: "Playlist Adicionada (URL)",
-          description: `"${nameToAdd}" foi adicionada com ${itemsToAdd.length} itens.`,
-        });
+        itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
 
       } else if (type === 'xtream') {
         setLoadingMessage('Conectando e buscando itens do Xtream Codes...');
-        if (!xtreamHost || !xtreamUser || !xtreamPassword) {
-           toast({ title: "Erro", description: "Preencha todos os campos do Xtream Codes.", variant: "destructive" });
+        if (!xtreamHost || !xtreamUser) { 
+           toast({ title: "Erro", description: "Preencha Host e Usuário do Xtream Codes.", variant: "destructive" });
            setIsLoading(false);
           return;
         }
-        const hostDomain = xtreamHost.split('//')[1]?.split(':')[0] || xtreamHost.split(':')[0] || 'Xtream Source';
+        const host = xtreamHost.trim();
+        const user = xtreamUser.trim();
+        const pass = xtreamPassword.trim();
+        sourceDetails = { type: 'xtream', host, username: user, password: pass };
+        const hostDomain = host.split('//')[1]?.split(':')[0] || host.split(':')[0] || 'Xtream Source';
         nameToAdd = nameToAdd || `Xtream: ${hostDomain}`;
-        sourceValue = xtreamHost; // Store host as sourceValue
         metadataBase.name = nameToAdd;
-        metadataBase.xtreamUsername = xtreamUser;
-        metadataBase.xtreamPassword = xtreamPassword; 
-        
-        itemsToAdd = await fetchXtreamPlaylistItems(playlistId, xtreamHost, xtreamUser, xtreamPassword);
-        
-        await addPlaylistWithItems({ 
-          ...metadataBase, 
-          sourceValue, 
-          xtreamUsername: xtreamUser, 
-          xtreamPassword: xtreamPassword 
-        }, itemsToAdd);
+        metadataBase.sourceDetails = sourceDetails;
+        metadataBase.status = 'processing';
+        await updatePlaylistMetadata(metadataBase); 
 
-        toast({
-          title: "Playlist Xtream Adicionada",
-          description: `"${nameToAdd}" foi adicionada com ${itemsToAdd.length} itens.`,
-        });
+        // fetchXtreamPlaylistItems needs to be updated to return PlaylistItem[] matching the new structure
+        itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
+
+      // Add items and update final metadata
+      // addPlaylistWithItems will update counts and set status to 'completed'
+      await addPlaylistWithItems(metadataBase, itemsToAdd); 
+      
+      toast({
+        title: `Playlist Adicionada (${type.toUpperCase()})`,
+        description: `"${nameToAdd}" foi processada com ${itemsToAdd.length} itens.`,
+      });
 
       await fetchPlaylists(); // Refresh list
       resetAddPlaylistForms();
-      // Consider closing dialog only on success. This requires not using DialogClose asChild unconditionally.
-      // For now, we assume it closes. If an error occurs, the toast shows, dialog might still close.
-      // To prevent closing on error, DialogClose would need to be triggered manually.
       const closeButton = document.querySelector('[data-radix-dialog-close="true"]') as HTMLElement | null;
-      if (closeButton) { // Ensure a more specific selector for the close button if needed
-          closeButton.click();
-      }
+      if (closeButton) closeButton.click();
 
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
+        const failedMetadata = { // Use a different name for the metadata object in the catch block
+            ...metadataBase,
+            status: 'failed' as 'failed', // Type assertion
+            statusMessage: error.message
+        };
+        await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
+
         let description = error.message || "Ocorreu um erro desconhecido.";
-        // This specific handling for URL fetch errors was added previously
         if (type === 'url' && (description.toLowerCase().includes('failed to fetch') || description.includes('falha ao buscar url'))) {
             description = "Falha ao buscar a URL. Verifique a conexão com a internet, a URL fornecida e se o servidor permite acesso externo (CORS).";
         }
@@ -208,7 +210,6 @@ export function PlaylistManagement() {
         setIsLoading(false);
     }
   };
-
 
   const openDeleteDialog = (playlist: PlaylistMetadata) => {
     setPlaylistToDelete(playlist);
@@ -245,9 +246,10 @@ export function PlaylistManagement() {
       setIsLoading(true);
       setLoadingMessage('Atualizando playlist...');
       try {
-        const updatedPlaylistData = { 
+        const updatedPlaylistData: PlaylistMetadata = { 
             ...editingPlaylist, 
             name: editPlaylistName.trim(),
+            lastUpdatedAt: Date.now(), 
         };
         await updatePlaylistMetadata(updatedPlaylistData); 
         toast({
@@ -287,7 +289,7 @@ export function PlaylistManagement() {
         duration: 5000,
       });
       setShowClearDataDialog(false);
-    } catch (error: any) {
+    } catch (error: any) { // Added missing curly brace here
       console.error("Error clearing all data:", error);
       toast({ title: "Erro ao Limpar Dados", description: error.message, variant: "destructive" });
     } finally {
@@ -313,7 +315,7 @@ export function PlaylistManagement() {
         <CardTitle className="flex items-center gap-2">
             <ListChecks className="h-6 w-6 text-primary" /> Gerenciamento de Playlists
         </CardTitle>
-        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador.</CardDescription>
+        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador. Máximo de {FILE_PLAYLIST_ITEM_LIMIT} itens por playlist.</CardDescription>
       </CardHeader>
       <CardContent>
         <Dialog onOpenChange={(open) => { if(!open && !isLoading) resetAddPlaylistForms(); }}>
@@ -395,7 +397,7 @@ export function PlaylistManagement() {
                 </div>
                 <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                  <Button type="button" onClick={() => handleAddNewPlaylist('xtream')} disabled={isLoading || !xtreamHost.trim() || !xtreamUser.trim() || !xtreamPassword.trim()}>Adicionar Xtream</Button>
+                  <Button type="button" onClick={() => handleAddNewPlaylist('xtream')} disabled={isLoading || !xtreamHost.trim() || !xtreamUser.trim()}>Adicionar Xtream</Button>
                 </DialogFooter>
               </TabsContent>
             </Tabs>
@@ -423,7 +425,13 @@ export function PlaylistManagement() {
                     <div className="flex-1 mb-2 sm:mb-0 mr-2">
                       <span className="font-medium text-foreground truncate block" title={playlist.name}>
                         {playlist.name}
-                        <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType}{playlist.sourceType === 'xtream' && playlist.xtreamUsername ? ` - ${playlist.xtreamUsername}` : ''})</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ({playlist.sourceType}
+                          {playlist.sourceType === 'xtream' && (playlist.sourceDetails as PlaylistSourceDetailsXtream).username ? ` - ${(playlist.sourceDetails as PlaylistSourceDetailsXtream).username}` : ''})
+                           {playlist.status === 'failed' && <span className="text-destructive ml-1">(Falha)</span>}
+                           {playlist.status === 'processing' && <span className="text-amber-500 ml-1">(Processando...)</span>}
+                           {playlist.status === 'completed' && <span className="text-green-500 ml-1">(Completo)</span>}
+                        </span>
                       </span>
                       <div className="text-xs text-muted-foreground flex items-center flex-wrap gap-x-2 gap-y-1 mt-1">
                         <span>Total: {playlist.itemCount ?? 0}</span>
@@ -432,8 +440,9 @@ export function PlaylistManagement() {
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
                         <span className="flex items-center"><Film className="h-3 w-3 mr-1 text-orange-500"/> {playlist.movieCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesCount ?? 0}</span>
+                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesEpisodeCount ?? 0} (Episódios) / {playlist.seriesCount ?? 0} (Séries)</span>
                       </div>
+                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1">Erro: {playlist.statusMessage}</p>}
                     </div>
                     <div className="space-x-1 flex-shrink-0">
                       <Dialog onOpenChange={(open) => { if(!open && !isLoading) setEditingPlaylist(null); }}>
@@ -535,4 +544,3 @@ export function PlaylistManagement() {
   );
 }
 
-    

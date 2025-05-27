@@ -28,40 +28,88 @@ export const STARTUP_PAGES = [
   { value: "favoritos", label: "Favoritos" },
 ];
 
-// This MOCK_PLAYLISTS is now for UI testing if DB is empty or for fallback.
-// Actual playlist metadata will be in IndexedDB.
-export const MOCK_PLAYLISTS_INITIAL_FOR_DEMO_ONLY = [
-  { id: "1", name: "My Awesome IPTV" },
-  { id: "2", name: "Movie Night Specials" },
-  { id: "3", name: "Binge Watch Series" },
-];
+export type PlaylistItemType = 'channel' | 'movie' | 'series_episode';
 
-export interface PlaylistItemCore {
+export interface PlaylistItem {
   id?: number; // Auto-incrementing primary key from IndexedDB
   playlistDbId: string; // Foreign key to the playlist's ID
+
+  itemType: PlaylistItemType;
+  title: string; // Original title from M3U (e.g., full episode title or movie title)
+  streamUrl: string;
+  logoUrl?: string; // tvg-logo
+  
+  groupTitle?: string; // Normalized group title (genre/category)
+  originalGroupTitle?: string; // Raw group-title from M3U
+
   tvgId?: string;
-  tvgName?: string;
-  tvgLogo?: string;
-  groupTitle?: string;
-  displayName: string;
-  url: string;
-  itemType: 'channel' | 'movie' | 'series' | 'unknown';
+  tvgName?: string; // Often the same as title, or a variation
+
+  genre?: string; // Extracted/normalized genre, could be same as groupTitle or refined
+
+  // Channel specific
+  baseChannelName?: string; // e.g., "ESPN" from "ESPN FHD"
+  quality?: string; // e.g., "FHD", "HD", "SD"
+
+  // Series specific
+  seriesTitle?: string; // e.g., "My Awesome Show"
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
-// This interface is for what ContentCard expects, adapted from PlaylistItemCore
+// This interface is for what ContentCard expects, and will need to be adapted from PlaylistItem
 export interface ContentItemForCard {
-  id: string; // Needs to be string for ContentCard key and link construction
-  title: string;
-  imageUrl?: string; // tvgLogo
-  type: 'movie' | 'series' | 'channel'; // Derived from itemType
-  genre?: string; // groupTitle
-  dataAiHint: string; // Will need to be generated or defaulted
-  streamUrl?: string; // url from PlaylistItemCore
+  id: string; // Needs to be string for ContentCard key and link construction (usually PlaylistItem.id.toString())
+  title: string; // Could be PlaylistItem.title, PlaylistItem.seriesTitle (for series card), or PlaylistItem.baseChannelName (for channel card)
+  imageUrl?: string; // logoUrl
+  type: 'movie' | 'series' | 'channel'; // Derived from itemType, or a broader category for display
+  genre?: string; // groupTitle or refined genre
+  dataAiHint: string;
+  streamUrl?: string; // Main stream URL or representative URL
+  // For aggregated channels
+  qualities?: string[]; 
+  sourceCount?: number;
+}
+
+export interface PlaylistSourceDetailsFile {
+  type: 'file';
+  fileName: string;
+}
+export interface PlaylistSourceDetailsUrl {
+  type: 'url';
+  url: string;
+}
+export interface PlaylistSourceDetailsXtream {
+  type: 'xtream';
+  host: string;
+  username: string;
+  password?: string; // Optional, as some Xtream setups might not require it or it's part of host
+}
+export type PlaylistSourceDetails = PlaylistSourceDetailsFile | PlaylistSourceDetailsUrl | PlaylistSourceDetailsXtream;
+
+
+export interface PlaylistMetadata {
+  id: string; // Unique ID for the playlist
+  name: string;
+  sourceType: 'file' | 'url' | 'xtream';
+  sourceDetails: PlaylistSourceDetails; // Replaces sourceValue, more structured
+  
+  itemCount?: number;
+  channelCount?: number;
+  movieCount?: number;
+  seriesCount?: number; // Counts series titles, not episodes
+  seriesEpisodeCount?: number; // Counts individual series_episode items
+
+  status?: 'pending' | 'processing' | 'completed' | 'failed'; // statusDoProcessamento
+  statusMessage?: string;
+
+  createdAt: number; // data de adição
+  lastUpdatedAt?: number; // data da última atualização (tentativa)
+  lastSuccessfulUpdateAt?: number; // data da última atualização bem-sucedida
 }
 
 
 // MOCK_CONTENT_ITEMS will be replaced by DB queries.
-// It can be kept for placeholder generation logic if needed.
 export const MOCK_CONTENT_ITEMS = (count = 12, hint = "abstract scene"): ContentItemForCard[] => Array.from({ length: count }, (_, i) => ({
   id: `${hint.replace(/\s+/g, '-')}-${i + 1}`,
   title: `${hint.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} #${i + 1}`,
@@ -73,18 +121,21 @@ export const MOCK_CONTENT_ITEMS = (count = 12, hint = "abstract scene"): Content
 export const MOCK_MOVIE_GENRES = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Thriller"];
 export const MOCK_SERIES_GENRES = ["Animation", "Crime", "Documentary", "Fantasy", "Mystery", "Sitcom"];
 
-// LocalStorage keys (some might be deprecated or work alongside IndexedDB)
-export const LOCALSTORAGE_PLAYLISTS_KEY_DEPRECATED = 'catcakestream_playlists_deprecated'; // Mark as deprecated
-export const LOCALSTORAGE_STARTUP_PAGE_KEY = 'catcakestream_startup_page';
-export const LOCALSTORAGE_THEME_KEY = 'catcakestream_theme';
-export const LOCALSTORAGE_PARENTAL_CONTROL_KEY = 'catcakestream_parental_control_enabled';
+// LocalStorage keys
+export const LOCALSTORAGE_STARTUP_PAGE_KEY = 'catcakeflix_startup_page';
+export const LOCALSTORAGE_THEME_KEY = 'catcakeflix_theme';
+export const LOCALSTORAGE_PARENTAL_CONTROL_KEY = 'catcakeflix_parental_control_enabled';
+export const LOCALSTORAGE_APP_OPEN_COUNT_KEY = 'catcakeflix_app_open_count';
+export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_refresh_'; // Append playlist ID
 
 // IndexedDB constants
-export const DB_NAME = 'CatCakeStreamDB';
-export const DB_VERSION = 1;
+export const DB_NAME = 'CatCakeFlixDB'; // Updated DB Name
+export const DB_VERSION = 2; // Increment version due to schema changes
 export const PLAYLIST_METADATA_STORE = 'playlists';
 export const PLAYLIST_ITEMS_STORE = 'playlistItems';
 
-export const FILE_PLAYLIST_ITEM_LIMIT = 50;
+export const FILE_PLAYLIST_ITEM_LIMIT = 2000; // Updated limit
 
-    
+// Auto-refresh settings
+export const REFRESH_INTERVAL_MINUTES = 60; // 1 hour
+export const REFRESH_APP_OPEN_TRIGGER_COUNT = 3;
