@@ -1,14 +1,67 @@
+
+"use client";
+
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
-import { MOCK_PLAYLISTS, MOCK_MOVIE_GENRES } from '@/lib/constants';
+import { MOCK_MOVIE_GENRES } from '@/lib/constants'; // MOCK_PLAYLISTS removed
+import { getAllPlaylistsMetadata } from '@/lib/db';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChevronRight, Film } from 'lucide-react';
-
-const hasPlaylistsConfigured = MOCK_PLAYLISTS.length > 0;
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function MoviesPage() {
+  const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  // TODO: Fetch genres dynamically from active playlist if desired
+  const [genres, setGenres] = useState<string[]>(MOCK_MOVIE_GENRES);
+
+
+  useEffect(() => {
+    async function checkPlaylists() {
+      setIsLoading(true);
+      try {
+        const playlists = await getAllPlaylistsMetadata();
+        setHasPlaylistsConfigured(playlists.length > 0);
+        // If playlists are configured, one could fetch genres dynamically here:
+        // if (playlists.length > 0 && playlists[0]?.id) {
+        //   const fetchedGenres = await getAllGenresForPlaylist(playlists[0].id, 'movie');
+        //   if (fetchedGenres.length > 0) setGenres(fetchedGenres);
+        // }
+      } catch (error) {
+        console.error("Failed to check playlists:", error);
+        setHasPlaylistsConfigured(false);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    checkPlaylists();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto px-0">
+        <PageHeader title="Movies" description="Explore a vast collection of movies across all genres." />
+        <Card className="shadow-lg border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Film className="h-6 w-6 text-primary" />
+              Browse by Genre
+            </CardTitle>
+            <CardDescription>Loading genres...</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full rounded-lg" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Movies" description="Explore a vast collection of movies across all genres." />
@@ -22,27 +75,25 @@ export default function MoviesPage() {
             <CardDescription>Select a genre to discover movies.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {MOCK_MOVIE_GENRES.map(genre => (
-                <Button 
-                  key={genre} 
-                  variant="outline" 
-                  className="justify-between w-full text-left h-auto p-4 rounded-lg hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground" 
-                  asChild
-                >
-                  <Link href={`/app/movies/genre/${encodeURIComponent(genre.toLowerCase())}`}>
-                    <span className="text-base font-medium">{genre}</span>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                  </Link>
-                </Button>
-              ))}
-            </div>
-            {/* Optionally, could also add a ContentGrid here for "Popular Movies" or "New Releases" */}
-            {/* For example:
-            <Separator className="my-8" />
-            <h3 className="text-xl font-semibold mb-4">Popular Movies</h3>
-            <ContentGrid items={MOCK_CONTENT_ITEMS(6, "popular movie")} type="movie" />
-            */}
+            {genres.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {genres.map(genre => (
+                  <Button 
+                    key={genre} 
+                    variant="outline" 
+                    className="justify-between w-full text-left h-auto p-4 rounded-lg hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground" 
+                    asChild
+                  >
+                    <Link href={`/app/movies/genre/${encodeURIComponent(genre.toLowerCase())}`}>
+                      <span className="text-base font-medium">{genre}</span>
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                    </Link>
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-center py-4">No movie genres found in your playlists.</p>
+            )}
           </CardContent>
         </Card>
       ) : (
