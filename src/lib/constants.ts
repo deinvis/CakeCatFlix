@@ -28,38 +28,40 @@ export const STARTUP_PAGES = [
   { value: "favoritos", label: "Favoritos" },
 ];
 
-// Interface para os itens brutos retornados pelo parser M3U
+// Interface for items parsed from M3U/Xtream, before DB insertion
+// This is the common structure produced by the parsers.
 export interface PlaylistItem {
-  playlistDbId: string;
-  itemType: 'channel' | 'movie' | 'series_episode';
-  
-  title: string; // Título principal do item (nome do canal, nome do episódio de série, nome do filme)
+  playlistDbId: string; // ID of the playlist this item belongs to
+  itemType: 'channel' | 'movie' | 'series_episode' | 'series'; // 'series' type for series overview from Xtream
+
+  title: string; // Primary display title (channel name, movie title, episode title, series title)
   streamUrl: string;
   logoUrl?: string;
-  
-  originalGroupTitle?: string; // group-title original do M3U
-  groupTitle?: string; // group-title normalizado (usado como gênero para filmes/séries)
 
-  tvgId?: string;
-  tvgName?: string; // tvg-name original do M3U
-  
-  genre?: string; // Gênero normalizado (derivado de groupTitle)
-  year?: number; // Para filmes
+  originalGroupTitle?: string; // group-title original from M3U or category from Xtream
+  groupTitle?: string; // group-title NORMALIZED (used as genre for movies/series, category for channels)
+
+  tvgId?: string; // tvg-id from M3U or stream_id/series_id from Xtream
+  tvgName?: string; // tvg-name original from M3U or name from Xtream
+
+  // Common fields, potentially derived
+  genre?: string; // Normalized genre (often derived from groupTitle)
+  year?: number; // For movies and potentially series (release year)
 
   // Channel specific
   baseChannelName?: string; // e.g., "ESPN" from "ESPN FHD"
   quality?: string; // e.g., "FHD"
 
-  // Series specific (para series_episode type)
-  seriesTitle?: string; // Título da série em si
-  seasonNumber?: number;
-  episodeNumber?: number;
+  // Series specific (for 'series_episode' type from M3U, or for 'series' type from Xtream)
+  seriesTitle?: string; // Title of the series itself
+  seasonNumber?: number; // For 'series_episode'
+  episodeNumber?: number; // For 'series_episode'
 }
 
 
-// Interfaces para os itens normalizados no DB
+// DB Item Interfaces
 export interface ChannelItem {
-  id?: number;
+  id?: number; // Auto-incremented DB ID
   playlistDbId: string;
   title: string;
   streamUrl: string;
@@ -73,7 +75,7 @@ export interface ChannelItem {
 }
 
 export interface MovieItem {
-  id?: number;
+  id?: number; // Auto-incremented DB ID
   playlistDbId: string;
   title: string;
   streamUrl: string;
@@ -87,52 +89,53 @@ export interface MovieItem {
 }
 
 export interface SeriesItem {
-  id?: number; // ID da série no banco
+  id?: number; // Auto-incremented DB ID for the series
   playlistDbId: string;
-  title: string; // Título da série
+  title: string; // Title of the series
   logoUrl?: string;
   groupTitle?: string; // Normalized, often used as genre
   originalGroupTitle?: string;
-  tvgId?: string;
+  tvgId?: string; // Can be series_id from Xtream or a common tvg-id for the series from M3U
   genre?: string; // Normalized genre
-  year?: number;
+  year?: number; // Release year of the series
 }
 
 export interface EpisodeItem {
-  id?: number; // ID do episódio no banco
+  id?: number; // Auto-incremented DB ID for the episode
   playlistDbId: string;
-  seriesDbId: number; // FK para SeriesItem.id
-  title: string; // Título do episódio (ex: "S01E01 - Pilot")
+  seriesDbId: number; // FK to SeriesItem.id
+  title: string; // Title of the episode (e.g., "S01E01 - Pilot" or just "Pilot")
   streamUrl: string;
-  logoUrl?: string;
+  logoUrl?: string; // Episode-specific thumbnail
   seasonNumber?: number;
   episodeNumber?: number;
-  tvgId?: string;
+  tvgId?: string; // Episode-specific tvg-id from M3U if available
 }
 
 
-// Interface para o que o ContentCard espera
+// Interface for what the ContentCard expects
 export interface ContentItemForCard {
-  id: string; // ID único para o card (pode ser baseChannelName para canais, MovieItem.id para filmes, SeriesItem.id para séries)
-  title: string; 
-  imageUrl?: string; 
-  type: 'movie' | 'series' | 'channel'; 
-  genre?: string; 
+  id: string; // Unique ID for the card (can be baseChannelName for channels, MovieItem.id for movies, SeriesItem.id for series)
+  title: string;
+  imageUrl?: string;
+  type: 'movie' | 'series' | 'channel';
+  genre?: string;
   dataAiHint: string;
-  streamUrl?: string;
-  
-  qualities?: string[]; 
-  sourceCount?: number;
-  
-  seriesId?: string; // Deve ser o SeriesItem.id para navegação
+  streamUrl?: string; // May not be directly playable for aggregated channels/series
+
+  qualities?: string[]; // For aggregated channels
+  sourceCount?: number; // For aggregated channels (sources/qualities) or series (episode count)
+
+  seriesId?: string; // Should be the SeriesItem.id (as string) for navigation to series player
+  year?: number; // Movie or Series year
 }
 
-// Interface para o que o VideoPlayer espera
+// Interface for what the VideoPlayer component expects
 export interface MediaItemForPlayer {
-  id: string | number;
+  id: string | number; // Unique ID of the content being played (movie id, series id + episode key, channel name + stream url)
   streamUrl: string | null;
-  title?: string;
-  type?: 'channel' | 'movie' | 'series_episode';
+  itemTitle?: string; // Display title for the player
+  itemType?: 'channel' | 'movie' | 'series_episode'; // Type of content, 'series_episode' for series playback
   posterUrl?: string;
 }
 
@@ -150,29 +153,29 @@ export interface PlaylistSourceDetailsXtream {
   type: 'xtream';
   host: string;
   username: string;
-  password?: string; 
+  password?: string;
 }
 export type PlaylistSourceDetails = PlaylistSourceDetailsFile | PlaylistSourceDetailsUrl | PlaylistSourceDetailsXtream;
 
 
 export interface PlaylistMetadata {
-  id: string; 
+  id: string;
   name: string;
   sourceType: 'file' | 'url' | 'xtream';
-  sourceDetails: PlaylistSourceDetails; 
-  
-  itemCount?: number;
-  channelCount?: number;
-  movieCount?: number;
-  seriesCount?: number; 
-  episodeCount?: number;
+  sourceDetails: PlaylistSourceDetails;
 
-  status?: 'pending' | 'processing' | 'completed' | 'failed'; 
+  itemCount?: number;         // Total raw items parsed from source
+  channelCount?: number;    // Count of unique ChannelItem stored
+  movieCount?: number;      // Count of unique MovieItem stored
+  seriesCount?: number;     // Count of unique SeriesItem stored
+  episodeCount?: number;    // Count of unique EpisodeItem stored (sum of all episodes for all series)
+
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
   statusMessage?: string;
 
-  createdAt: number; 
-  lastUpdatedAt?: number; 
-  lastSuccessfulUpdateAt?: number; 
+  createdAt: number;
+  lastUpdatedAt?: number;
+  lastSuccessfulUpdateAt?: number;
 }
 
 
@@ -181,7 +184,7 @@ export const MOCK_CONTENT_ITEMS = (count = 12, hint = "abstract scene"): Content
   title: `${hint.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} #${i + 1}`,
   imageUrl: `https://placehold.co/300x450.png`,
   dataAiHint: hint,
-  type: 'movie', 
+  type: 'movie',
 }));
 
 export const MOCK_MOVIE_GENRES = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Thriller"];
@@ -192,11 +195,11 @@ export const LOCALSTORAGE_STARTUP_PAGE_KEY = 'catcakeflix_startup_page';
 export const LOCALSTORAGE_THEME_KEY = 'catcakeflix_theme';
 export const LOCALSTORAGE_PARENTAL_CONTROL_KEY = 'catcakeflix_parental_control_enabled';
 export const LOCALSTORAGE_APP_OPEN_COUNT_KEY = 'catcakeflix_app_open_count';
-export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_refresh_'; 
+export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_refresh_';
 
 // IndexedDB constants
-export const DB_NAME = 'CatCakeFlixDB'; 
-export const DB_VERSION = 5; 
+export const DB_NAME = 'CatCakeFlixDB';
+export const DB_VERSION = 5; // Incremented due to potential new indices or store changes
 export const PLAYLIST_METADATA_STORE = 'playlists';
 
 export const CHANNELS_STORE = 'channels';
@@ -204,12 +207,12 @@ export const MOVIES_STORE = 'movies';
 export const SERIES_STORE = 'series';
 export const EPISODES_STORE = 'episodes';
 
-export const LEGACY_PLAYLIST_ITEMS_STORE = 'playlistItems';
+export const LEGACY_PLAYLIST_ITEMS_STORE = 'playlistItems'; // Name of the old flat store
 
 // Set to a very large number to effectively remove the limit for M3U file processing.
 // Browser/system memory will be the practical limit.
-export const FILE_PLAYLIST_ITEM_LIMIT = Number.MAX_SAFE_INTEGER; 
+export const FILE_PLAYLIST_ITEM_LIMIT = Number.MAX_SAFE_INTEGER;
 
 // Auto-refresh settings
-export const REFRESH_INTERVAL_MINUTES = 60; 
+export const REFRESH_INTERVAL_MINUTES = 60;
 export const REFRESH_APP_OPEN_TRIGGER_COUNT = 3;

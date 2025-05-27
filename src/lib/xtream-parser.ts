@@ -3,14 +3,16 @@
 /**
  * @fileOverview Xtream Codes API interaction and parsing logic.
  */
-import type { PlaylistItemCore, PlaylistMetadata } from '@/lib/constants';
+import type { PlaylistItem } from '@/lib/constants';
 import { FILE_PLAYLIST_ITEM_LIMIT } from '@/lib/constants';
+import {
+  extractChannelDetails,
+  extractSeriesDetails, // Not directly used for get_series, but could be for get_series_info
+  extractMovieYear,
+  normalizeGroupTitle
+} from '@/lib/m3u-parser';
 
 const XTREAM_API_PATH = '/player_api.php';
-// Apply a limit to prevent fetching an overwhelming number of items from Xtream.
-// This limit is now sourced from constants.ts
-const XTREAM_ITEM_FETCH_LIMIT = FILE_PLAYLIST_ITEM_LIMIT;
-
 
 interface XtreamCategory {
   category_id: string;
@@ -36,38 +38,36 @@ interface XtreamLiveStream {
 interface XtreamVodStream {
   num: number;
   name: string;
-  stream_type: 'movie'; // or 'series' if series are listed like VODs by some panels
+  stream_type: 'movie';
   stream_id: number;
   stream_icon: string | null;
   added: string;
   category_id: string;
   container_extension: string;
   custom_sid: string | null;
-  rating: string | number | null; // Can be string like "7.2" or number
+  rating: string | number | null;
   rating_5based: number | null;
   direct_source: string;
-  // Movies might have releaseDate, plot, cast, director, genre, duration_secs, duration, etc.
-  // For simplicity, we'll focus on core fields for PlaylistItemCore
-  year?: string;
+  year?: string; // Typically a string from Xtream API
   plot?: string;
   cast?: string;
   director?: string;
-  genre?: string;
+  genre?: string; // Genre string, sometimes comma-separated
   duration_secs?: number;
   duration?: string;
-  releaseDate?: string; // Sometimes available
+  releaseDate?: string;
 }
 
 interface XtreamSeriesInfo {
-  num: number; // Often not present directly in series list, but for consistency
+  num: number;
   name: string;
-  series_id: number; // Different from stream_id for episodes
-  cover: string | null; // Equivalent to stream_icon
+  series_id: number;
+  cover: string | null;
   plot: string | null;
   cast: string | null;
   director: string | null;
-  genre: string | null;
-  releaseDate: string; // Or release_date
+  genre: string | null; // Genre string, sometimes comma-separated
+  releaseDate: string;
   last_modified: string;
   rating: string | number | null;
   rating_5based: number | null;
@@ -76,6 +76,7 @@ interface XtreamSeriesInfo {
   episode_run_time: string;
   category_id: string;
   // Season and episode data usually fetched with action=get_series_info&series_id=
+  // For get_series, we get the series overview.
 }
 
 
@@ -84,7 +85,6 @@ function normalizeXtreamHost(host: string): string {
   if (!normalizedHost.startsWith('http://') && !normalizedHost.startsWith('https://')) {
     normalizedHost = `http://${normalizedHost}`;
   }
-  // Remove trailing slash if present, before appending API path
   if (normalizedHost.endsWith('/')) {
     normalizedHost = normalizedHost.slice(0, -1);
   }
@@ -100,32 +100,40 @@ async function fetchFromXtreamAPI(
   const fullUrl = `${baseApiUrl}&${urlParams.toString()}`;
 
   try {
-    const response = await fetch(fullUrl);
+    // Use a proxy for the API call itself to avoid potential CORS issues on the client-side request if this were client-side
+    // However, since this is 'use server', it runs on the server, so direct fetch is fine.
+    // If this were ever moved to client-side, a proxy for player_api.php calls might be needed.
+    const response = await fetch(fullUrl, {
+        headers: { 'User-Agent': 'CatCakeFlix/1.0 (XtreamParser)'}
+    });
+
     if (!response.ok) {
-      throw new Error(`Xtream API request failed for action ${action}: ${response.status} ${response.statusText}`);
+      // Try to get more details from the response if possible
+      let errorBody = '';
+      try {
+        errorBody = await response.text();
+      } catch (e) { /* ignore if can't read body */ }
+      throw new Error(`Xtream API request failed for action ${action}: ${response.status} ${response.statusText}. Body: ${errorBody}`);
     }
-    // Xtream APIs sometimes return empty body for "no content" which results in JSON parse error
-    // or can return an object like {user_info: null, server_info: null} for auth failure
+    
     const textContent = await response.text();
     if (!textContent) {
-        return []; // Treat empty response as empty list
+        console.warn(`Xtream API: Empty response for action ${action}, URL: ${fullUrl}`);
+        return [];
     }
     const data = JSON.parse(textContent);
 
-    // Handle auth failure specifically for some panels
     if (data && data.user_info && data.user_info.auth === 0) {
         throw new Error(`Xtream API authentication failed for action ${action}. Check credentials.`);
     }
-    // If data is an object but not an array (e.g. error object), or null
     if (data === null || (typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 0) ) {
+        console.warn(`Xtream API: Null or empty object response for action ${action}, URL: ${fullUrl}`);
         return [];
     }
-
-
     return data;
   } catch (error) {
-    console.error(`Error fetching Xtream action ${action}:`, error);
-    throw error; // Re-throw to be caught by the caller
+    console.error(`Error fetching Xtream action ${action} (URL: ${fullUrl}):`, error);
+    throw error;
   }
 }
 
@@ -133,16 +141,16 @@ export async function fetchXtreamPlaylistItems(
   playlistId: string,
   host: string,
   username: string,
-  password: string
-): Promise<PlaylistItemCore[]> {
+  password?: string // Password can be optional for some Xtream setups
+): Promise<PlaylistItem[]> {
   const normalizedHost = normalizeXtreamHost(host);
-  const baseApiUrl = `${normalizedHost}${XTREAM_API_PATH}?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+  const pwParam = password ? `&password=${encodeURIComponent(password)}` : '';
+  const baseApiUrl = `${normalizedHost}${XTREAM_API_PATH}?username=${encodeURIComponent(username)}${pwParam}`;
 
-  const allItems: PlaylistItemCore[] = [];
+  const allItems: PlaylistItem[] = [];
   const categoryMap = new Map<string, string>();
 
   try {
-    // Fetch Categories to map IDs to names
     const liveCategories: XtreamCategory[] = await fetchFromXtreamAPI(baseApiUrl, 'get_live_categories') || [];
     liveCategories.forEach(cat => categoryMap.set(cat.category_id, cat.category_name));
 
@@ -155,67 +163,103 @@ export async function fetchXtreamPlaylistItems(
     // Fetch Live Streams
     const liveStreams: XtreamLiveStream[] = await fetchFromXtreamAPI(baseApiUrl, 'get_live_streams') || [];
     for (const item of liveStreams) {
-      if (allItems.length >= XTREAM_ITEM_FETCH_LIMIT) break;
+      if (allItems.length >= FILE_PLAYLIST_ITEM_LIMIT) break;
+      
+      const originalGroupName = categoryMap.get(item.category_id) || 'Live Channels';
+      const { baseChannelName, quality } = extractChannelDetails(item.name);
+      const normGroupTitle = normalizeGroupTitle(originalGroupName, 'channel');
+
       allItems.push({
         playlistDbId: playlistId,
+        itemType: 'channel',
+        title: item.name, 
+        streamUrl: `${normalizedHost}/live/${username}/${password || ''}/${item.stream_id}.ts`,
+        logoUrl: item.stream_icon || undefined,
+        originalGroupTitle: originalGroupName,
+        groupTitle: normGroupTitle,
         tvgId: item.epg_channel_id || item.stream_id.toString(),
         tvgName: item.name,
-        tvgLogo: item.stream_icon || undefined,
-        groupTitle: categoryMap.get(item.category_id) || 'Live Channels',
-        displayName: item.name,
-        url: `${normalizedHost}/live/${username}/${password}/${item.stream_id}.ts`, // .ts is common, .m3u8 might also be an option
-        itemType: 'channel',
+        baseChannelName: baseChannelName,
+        quality: quality,
+        genre: normGroupTitle,
       });
     }
 
     // Fetch VOD Streams (Movies)
-    if (allItems.length < XTREAM_ITEM_FETCH_LIMIT) {
+    if (allItems.length < FILE_PLAYLIST_ITEM_LIMIT) {
       const vodStreams: XtreamVodStream[] = await fetchFromXtreamAPI(baseApiUrl, 'get_vod_streams') || [];
       for (const item of vodStreams) {
-        if (allItems.length >= XTREAM_ITEM_FETCH_LIMIT) break;
+        if (allItems.length >= FILE_PLAYLIST_ITEM_LIMIT) break;
+
+        const originalGroupName = categoryMap.get(item.category_id) || 'Movies';
+        // Xtream API might provide 'year' as string, or 'releaseDate'. Prefer 'year' if number-like, else parse from 'releaseDate' or 'name'.
+        let movieYearNum: number | undefined = item.year ? parseInt(item.year, 10) : undefined;
+        if (isNaN(movieYearNum as number) && item.releaseDate) {
+            movieYearNum = new Date(item.releaseDate).getFullYear();
+        }
+        if (isNaN(movieYearNum as number)) {
+            movieYearNum = extractMovieYear(item.name);
+        }
+        const normGroupTitle = normalizeGroupTitle(originalGroupName, 'movie');
+        // Xtream 'genre' for VOD is often a string, sometimes comma-separated. We take it as is for now.
+        // The m3u-parser's normalizeGroupTitle used for `normGroupTitle` is often better for UI grouping.
+        const itemGenre = item.genre || normGroupTitle;
+
+
         allItems.push({
           playlistDbId: playlistId,
+          itemType: 'movie',
+          title: item.name,
+          streamUrl: `${normalizedHost}/movie/${username}/${password || ''}/${item.stream_id}.${item.container_extension || 'mp4'}`,
+          logoUrl: item.stream_icon || undefined,
+          originalGroupTitle: originalGroupName,
+          groupTitle: normGroupTitle, 
           tvgId: item.stream_id.toString(),
           tvgName: item.name,
-          tvgLogo: item.stream_icon || undefined,
-          groupTitle: categoryMap.get(item.category_id) || 'Movies',
-          displayName: item.name,
-          url: `${normalizedHost}/movie/${username}/${password}/${item.stream_id}.${item.container_extension || 'mp4'}`,
-          itemType: 'movie',
+          year: isNaN(movieYearNum as number) ? undefined : movieYearNum,
+          genre: itemGenre,
         });
       }
     }
 
-    // Fetch Series
-    if (allItems.length < XTREAM_ITEM_FETCH_LIMIT) {
+    // Fetch Series (Series Overviews)
+    if (allItems.length < FILE_PLAYLIST_ITEM_LIMIT) {
       const seriesList: XtreamSeriesInfo[] = await fetchFromXtreamAPI(baseApiUrl, 'get_series') || [];
       for (const item of seriesList) {
-        if (allItems.length >= XTREAM_ITEM_FETCH_LIMIT) break;
-        // For series, the direct URL is not for playback of the whole series.
-        // It's more of an identifier. Real playback requires fetching episodes.
-        // For now, the URL can be symbolic or empty.
-        const seriesStreamUrl = `${normalizedHost}/series/${username}/${password}/${item.series_id}`; // This isn't a playable stream but an identifier path
+        if (allItems.length >= FILE_PLAYLIST_ITEM_LIMIT) break;
+        
+        const originalGroupName = categoryMap.get(item.category_id) || 'Series';
+        let seriesYearNum: number | undefined = undefined;
+        if (item.releaseDate) {
+            const parsedYear = new Date(item.releaseDate).getFullYear();
+            if (!isNaN(parsedYear)) seriesYearNum = parsedYear;
+        }
+        const normGroupTitle = normalizeGroupTitle(originalGroupName, 'series_episode'); // Use 'series_episode' type for group title normalization consistency
+        const itemGenre = item.genre || normGroupTitle;
 
         allItems.push({
           playlistDbId: playlistId,
+          itemType: 'series', // This represents a series overview
+          title: item.name,
+          streamUrl: `${normalizedHost}/series/${username}/${password || ''}/${item.series_id}`, // This is a symbolic URL, not directly playable as a single stream
+          logoUrl: item.cover || undefined,
+          originalGroupTitle: originalGroupName,
+          groupTitle: normGroupTitle,
           tvgId: item.series_id.toString(),
           tvgName: item.name,
-          tvgLogo: item.cover || undefined,
-          groupTitle: categoryMap.get(item.category_id) || 'Series',
-          displayName: item.name,
-          url: seriesStreamUrl, // Placeholder-like URL, special handling needed by player
-          itemType: 'series',
+          seriesTitle: item.name, // For series type, seriesTitle is the main title
+          genre: itemGenre,
+          year: seriesYearNum,
+          // seasonNumber and episodeNumber are not applicable for a series overview
         });
       }
     }
     
   } catch (error) {
     console.error("Failed to fetch or parse Xtream playlist items:", error);
-    // Re-throw the error so it can be caught in PlaylistManagement and shown to the user
-    throw error;
+    throw error; 
   }
 
-  return allItems.slice(0, XTREAM_ITEM_FETCH_LIMIT);
+  // The FILE_PLAYLIST_ITEM_LIMIT is checked within the loops.
+  return allItems;
 }
-
-    
