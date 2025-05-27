@@ -8,7 +8,7 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type MovieItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
-// Removed Input import as it's not used here currently
+import { Input } from '@/components/ui/input'; // Import Input
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
@@ -33,7 +33,7 @@ export default function MoviesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // Keep for future use or consistency
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchAndGroupMovies = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
@@ -50,7 +50,7 @@ export default function MoviesPage() {
 
       const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
       setAllGroupedMovieItems(sortedGroups);
-      setDisplayedGroupedMovieItems(sortedGroups); // Update displayed items
+      setDisplayedGroupedMovieItems(sortedGroups);
 
     } catch (error) {
       console.error("Failed to fetch or group movie items:", error);
@@ -65,7 +65,7 @@ export default function MoviesPage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
-      setSearchTerm(''); // Reset search term on init
+      setSearchTerm(''); 
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
@@ -88,7 +88,6 @@ export default function MoviesPage() {
     initialize();
   }, [fetchAndGroupMovies]);
 
-  // Example filter effect if search is added to this page later
    useEffect(() => {
     if (isLoading) return;
     if (!searchTerm) {
@@ -101,13 +100,16 @@ export default function MoviesPage() {
     setDisplayedGroupedMovieItems(filtered);
   }, [searchTerm, allGroupedMovieItems, isLoading]);
 
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+  };
+
 
   if (hasPlaylistsConfigured === null || (isLoading && allGroupedMovieItems.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes." />
-        {/* Optional: Skeleton for search bar */}
-        {/* <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" />  */}
+        <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" /> 
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="mb-8 md:mb-12">
             <Skeleton className="h-8 w-1/4 mb-4 rounded-md" />
@@ -131,7 +133,15 @@ export default function MoviesPage() {
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes organizados por gênero." />
-      {/* Search input could be added here if desired for this page */}
+      <div className="mb-6">
+        <Input
+          type="search"
+          placeholder="Buscar por gêneros de filmes..."
+          className="w-full sm:w-72"
+          value={searchTerm}
+          onChange={handleSearchChange}
+        />
+      </div>
       {hasPlaylistsConfigured ? (
         displayedGroupedMovieItems.length > 0 ? (
           displayedGroupedMovieItems.map(group => (
@@ -154,5 +164,3 @@ export default function MoviesPage() {
     </div>
   );
 }
-
-    

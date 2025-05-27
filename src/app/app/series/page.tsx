@@ -8,7 +8,7 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type SeriesItem, type EpisodeItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
-// Removed Input import as it's not used here currently
+import { Input } from '@/components/ui/input'; // Import Input
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
@@ -34,7 +34,7 @@ export default function SeriesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // Keep for future use or consistency
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchAndGroupSeries = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
@@ -42,13 +42,18 @@ export default function SeriesPage() {
     try {
       const uniqueSeriesFromDB = await getPlaylistItems(playlistId, 'series') as SeriesItem[];
       const allEpisodesFromDB = await getPlaylistItems(playlistId, 'episode') as EpisodeItem[];
+      
       const episodeCounts = new Map<number, number>();
       allEpisodesFromDB.forEach(ep => {
-        episodeCounts.set(ep.seriesDbId, (episodeCounts.get(ep.seriesDbId) || 0) + 1);
+        if (ep.seriesDbId !== undefined) { // Ensure seriesDbId is defined
+          episodeCounts.set(ep.seriesDbId, (episodeCounts.get(ep.seriesDbId) || 0) + 1);
+        }
       });
+
       const uniqueSeriesCardItems = uniqueSeriesFromDB.map(series =>
-        transformSeriesItemToCardItem(series, episodeCounts.get(series.id!) || 0)
+        transformSeriesItemToCardItem(series, series.id !== undefined ? (episodeCounts.get(series.id) || 0) : 0)
       );
+      
       const genres = await getAllGenresForPlaylist(playlistId, 'series');
       const groups: GroupedSeries[] = genres.map(genre => ({
         genre: genre,
@@ -57,7 +62,7 @@ export default function SeriesPage() {
 
       const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
       setAllGroupedSeriesItems(sortedGroups);
-      setDisplayedGroupedSeriesItems(sortedGroups); // Update displayed items
+      setDisplayedGroupedSeriesItems(sortedGroups);
 
     } catch (error) {
       console.error("Failed to fetch or group series items:", error);
@@ -72,7 +77,7 @@ export default function SeriesPage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
-      setSearchTerm(''); // Reset search term on init
+      setSearchTerm(''); 
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
@@ -95,7 +100,6 @@ export default function SeriesPage() {
     initialize();
   }, [fetchAndGroupSeries]);
 
-   // Example filter effect if search is added to this page later
    useEffect(() => {
     if (isLoading) return;
     if (!searchTerm) {
@@ -108,13 +112,16 @@ export default function SeriesPage() {
     setDisplayedGroupedSeriesItems(filtered);
   }, [searchTerm, allGroupedSeriesItems, isLoading]);
 
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+  };
+
 
   if (hasPlaylistsConfigured === null || (isLoading && allGroupedSeriesItems.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Séries de TV" description="Assista suas séries favoritas e descubra novas." />
-        {/* Optional: Skeleton for search bar */}
-        {/* <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" /> */}
+        <Skeleton className="h-10 w-full sm:w-72 mb-6 rounded-md" /> 
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="mb-8 md:mb-12">
             <Skeleton className="h-8 w-1/4 mb-4 rounded-md" />
@@ -138,7 +145,15 @@ export default function SeriesPage() {
   return (
     <div className="container mx-auto px-0">
       <PageHeader title="Séries de TV" description="Assista suas séries favoritas e descubra novas." />
-      {/* Search input could be added here if desired for this page */}
+       <div className="mb-6">
+        <Input
+          type="search"
+          placeholder="Buscar por gêneros de séries..."
+          className="w-full sm:w-72"
+          value={searchTerm}
+          onChange={handleSearchChange}
+        />
+      </div>
       {hasPlaylistsConfigured ? (
         displayedGroupedSeriesItems.length > 0 ? (
           displayedGroupedSeriesItems.map(group => (
@@ -161,5 +176,3 @@ export default function SeriesPage() {
     </div>
   );
 }
-
-    
