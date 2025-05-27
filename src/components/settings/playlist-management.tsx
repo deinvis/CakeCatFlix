@@ -106,7 +106,7 @@ export function PlaylistManagement() {
       id: playlistId,
       name: '', 
       sourceType: type,
-      sourceDetails: {} as any, 
+      sourceDetails: {} as any, // Will be populated based on type
       createdAt: Date.now(),
       status: 'pending',
       channelCount: 0,
@@ -129,11 +129,12 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
+        // Save initial metadata so it appears in the list as "processing"
         await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for file:", e));
-        await fetchPlaylists(); 
+        await fetchPlaylists(); // Refresh list to show processing item
         
         const fileContent = await newPlaylistFile.text();
-        itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
+        itemsToAdd = parseM3U(fileContent, playlistId); 
 
       } else if (type === 'url') {
         setLoadingMessage('Buscando e processando URL M3U...');
@@ -159,7 +160,7 @@ export function PlaylistManagement() {
           throw new Error(errorData.error || `Falha ao buscar URL via proxy: ${response.status} ${response.statusText}.`);
         }
         const urlContent = await response.text();
-        itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
+        itemsToAdd = parseM3U(urlContent, playlistId); 
 
       } else if (type === 'xtream') {
         setLoadingMessage('Conectando e buscando itens do Xtream Codes...');
@@ -172,6 +173,7 @@ export function PlaylistManagement() {
         const user = xtreamUser.trim();
         const pass = xtreamPassword.trim();
         sourceDetails = { type: 'xtream', host, username: user, password: pass };
+        // Attempt to derive a more user-friendly name from the host if no custom name is given
         const hostDomain = host.split('//')[1]?.split(':')[0] || host.split(':')[0] || 'Xtream Source';
         nameToAdd = nameToAdd || `Xtream: ${hostDomain}`;
         metadataBase.name = nameToAdd;
@@ -183,28 +185,29 @@ export function PlaylistManagement() {
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
-      metadataBase.name = nameToAdd; 
-      await addPlaylistWithItems(metadataBase, itemsToAdd); 
+      metadataBase.name = nameToAdd; // Ensure final name is set
+      await addPlaylistWithItems(metadataBase, itemsToAdd); // This will update counts and status
       
       toast({
         title: `Playlist Adicionada (${type.toUpperCase()})`,
         description: `"${nameToAdd}" foi processada. Total de ${itemsToAdd.length} itens brutos, verifique as contagens detalhadas.`,
       });
 
-      await fetchPlaylists(); 
+      await fetchPlaylists(); // Fetch again to get final counts and status
       resetAddPlaylistForms();
       const closeButton = document.querySelector('[data-radix-dialog-close="true"]') as HTMLElement | null;
       if (closeButton) closeButton.click();
 
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
+        // Update metadata to failed status
         const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
-            name: nameToAdd || `Falha ao adicionar ${type}`, 
+            name: nameToAdd || `Falha ao adicionar ${type}`, // Use determined name or a generic one
             status: 'failed' as 'failed', 
             statusMessage: error.message || "Erro desconhecido",
             lastUpdatedAt: Date.now(),
-            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, 
+            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, // Reset counts on failure
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
 
@@ -218,7 +221,7 @@ export function PlaylistManagement() {
             variant: "destructive",
             duration: 7000 
         });
-        await fetchPlaylists(); 
+        await fetchPlaylists(); // Refresh list to show failed status
     } finally {
         setIsLoading(false);
     }
@@ -239,7 +242,7 @@ export function PlaylistManagement() {
           description: `"${playlistToDelete.name}" foi removida.`,
         });
         setPlaylistToDelete(null);
-        await fetchPlaylists(); 
+        await fetchPlaylists(); // Refresh list
       } catch (error: any) {
         console.error("Error deleting playlist:", error);
         toast({ title: "Erro ao Apagar", description: error.message, variant: "destructive" });
@@ -264,13 +267,13 @@ export function PlaylistManagement() {
             name: editPlaylistName.trim(),
             lastUpdatedAt: Date.now(), 
         };
-        await updatePlaylistMetadata(updatedPlaylistData); 
+        await updatePlaylistMetadata(updatedPlaylistData); // updatePlaylistMetadata should update all relevant fields
         toast({
           title: "Playlist Atualizada",
           description: `"${updatedPlaylistData.name}" foi atualizada.`,
         });
-        setEditingPlaylist(null); 
-        await fetchPlaylists(); 
+        setEditingPlaylist(null); // Close dialog / reset state
+        await fetchPlaylists(); // Refresh list
       } catch (error: any) {
         console.error("Error updating playlist:", error);
         toast({ title: "Erro ao Atualizar", description: error.message, variant: "destructive" });
@@ -287,14 +290,16 @@ export function PlaylistManagement() {
     setLoadingMessage('Limpando todos os dados...');
     try {
       await clearAllAppData();
+      // Clear relevant localStorage keys
       const appStorageKeys = [
         LOCALSTORAGE_STARTUP_PAGE_KEY,
         LOCALSTORAGE_THEME_KEY,
         LOCALSTORAGE_PARENTAL_CONTROL_KEY,
+        // Add other app-specific localStorage keys if any
       ];
       appStorageKeys.forEach(key => localStorage.removeItem(key));
       
-      setPlaylists([]);
+      setPlaylists([]); // Clear local state
       
       toast({
         title: "Dados da Aplicação Apagados",
@@ -367,6 +372,7 @@ export function PlaylistManagement() {
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setNewPlaylistFile(e.target.files ? e.target.files[0] : null)} 
                     disabled={isLoading}
                   />
+                   <p className="text-xs text-muted-foreground">O sistema tentará processar todos os itens do arquivo.</p>
                 </div>
                 <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
@@ -455,12 +461,12 @@ export function PlaylistManagement() {
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
                         <span className="flex items-center"><Users className="h-3 w-3 mr-1 text-purple-500"/> Episódios: {playlist.episodeCount ?? 0}</span>
                       </div>
-                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1 break-all hidden">Erro Detalhado: {playlist.statusMessage}</p>}
+                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1 break-all">{playlist.statusMessage}</p>}
                     </div>
                     <div className="space-x-1 flex-shrink-0">
                       <Dialog onOpenChange={(open) => { if(!open && !isLoading) setEditingPlaylist(null); }}>
                         <DialogTrigger asChild>
-                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(playlist)} aria-label={`Editar ${playlist.name}`} disabled={isLoading}>
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(playlist)} aria-label={`Editar ${playlist.name}`} disabled={isLoading || playlist.status === 'processing'}>
                             <Edit className="h-4 w-4" />
                           </Button>
                         </DialogTrigger>
@@ -489,7 +495,7 @@ export function PlaylistManagement() {
                       
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(playlist)} aria-label={`Apagar ${playlist.name}`} disabled={isLoading}>
+                          <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(playlist)} aria-label={`Apagar ${playlist.name}`} disabled={isLoading || playlist.status === 'processing'}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </AlertDialogTrigger>
