@@ -1,9 +1,12 @@
 
+"use client";
+
 import Image from 'next/image';
 import { Card, CardContent } from '@/components/ui/card';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
-import { Tv2, Film, Clapperboard, Server } from 'lucide-react'; // Added Server for sourceCount
+import { Tv2, Film, Clapperboard, Server } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface ContentCardProps extends ContentItemForCard {}
 
@@ -14,26 +17,34 @@ export function ContentCard({
   type, 
   genre, 
   dataAiHint, 
-  streamUrl,
+  streamUrl, // streamUrl might be for direct play or an episode
   qualities,
-  sourceCount
+  sourceCount,
+  seriesId // Used for navigating to series player/detail page
 }: ContentCardProps) {
   
+  const router = useRouter();
   const imageSrc = imageUrl || `https://placehold.co/300x450.png`;
   const finalDataAiHint = dataAiHint || `${type} ${title}`.substring(0,50).toLowerCase();
 
   const handleClick = () => {
-    // TODO: Navigate to a dedicated player page: /app/player/[type]/[id]
-    // For aggregated channels, id might be baseChannelName. Player page needs to handle fetching specific stream URLs.
-    if (streamUrl) {
-      console.log(`Attempting to play: ${title} - ${streamUrl}`);
-      alert(`Play: ${title}\nURL: ${streamUrl}\n(Player not implemented)`);
-    } else if (type === 'channel' && sourceCount && sourceCount > 0) {
-      console.log(`Aggregated channel clicked: ${title}. Navigate to detail/player page to select stream.`);
-      alert(`Channel: ${title}\n${sourceCount} sources available.\n(Player/Detail page not implemented)`);
+    if (type === 'movie') {
+      console.log(`Navigating to player for movie: ${title} (ID: ${id})`);
+      router.push(`/app/player/movie/${id}`);
+    } else if (type === 'series') {
+      // For a series card, 'id' might be the series title or first episode's ID. 
+      // 'seriesId' should be the canonical ID for the series.
+      const navId = seriesId || id; 
+      console.log(`Navigating to player/details for series: ${title} (SeriesID: ${navId})`);
+      router.push(`/app/player/series/${navId}`);
+    } else if (type === 'channel') {
+      // For an aggregated channel, 'id' is the baseChannelName.
+      // A dedicated channel player page would handle stream selection.
+      console.log(`Navigating to player/details for channel: ${title} (BaseName: ${id})`);
+      router.push(`/app/player/channel/${id}`);
     } else {
-      console.log(`No stream URL for: ${title}. Consider navigating to a detail page.`);
-       alert(`Details for: ${title}\n(Detail page not implemented)`);
+      console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined or streamUrl missing.`);
+      alert(`Details for: ${title}\n(Player/Detail page not implemented for this type or missing URL)`);
     }
   };
 
@@ -62,8 +73,7 @@ export function ContentCard({
                 (e.target as HTMLImageElement).src = `https://placehold.co/300x450.png`;
               }}
             />
-             {/* Type Badge Top-Left */}
-            <Badge variant="default" className="absolute top-2 left-2 text-xs">
+            <Badge variant="default" className="absolute top-2 left-2 text-xs shadow-md">
               <TypeIcon className="h-3 w-3 mr-1" />
               {type.charAt(0).toUpperCase() + type.slice(1)}
             </Badge>
@@ -83,7 +93,7 @@ export function ContentCard({
                   <Server className="h-3 w-3 mr-1" /> {sourceCount}
                 </Badge>
               )}
-              {type === 'channel' && qualities && qualities.length > 0 && sourceCount === 1 && (
+              {type === 'channel' && qualities && qualities.length > 0 && (!sourceCount || sourceCount === 1) && (
                  <Badge variant="outline" className="text-xs">
                   {qualities.join('/')}
                 </Badge>

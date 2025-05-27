@@ -12,22 +12,9 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input'; // Added Input import
 
 const ITEMS_PER_PAGE = 28;
-
-// Transforms a PlaylistItem (episode) into a ContentItemForCard representing the series
-const transformEpisodeToSeriesCard = (item: PlaylistItem): ContentItemForCard => ({
-  id: item.seriesTitle || item.id!.toString(), // Use seriesTitle as ID for aggregation, or episode ID
-  title: item.seriesTitle || item.title, // Display series title
-  imageUrl: item.logoUrl, // Logo for the series (could be from any episode)
-  type: 'series',
-  genre: item.genre || item.groupTitle,
-  dataAiHint: `series ${item.seriesTitle || item.genre || ''}`.substring(0, 50).trim().toLowerCase(),
-  // streamUrl: item.streamUrl, // Not for series card, but for episode card if we were listing episodes
-  seriesId: item.tvgId || item.seriesTitle,
-  // sourceCount will be set during aggregation if we group episodes by series
-});
-
 
 export default function SeriesGenrePage() {
   const params = useParams<{ genreName: string }>();
@@ -40,6 +27,7 @@ export default function SeriesGenrePage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [genreExistsInMock, setGenreExistsInMock] = useState<boolean | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // For future search functionality
 
   useEffect(() => {
     const foundGenre = MOCK_SERIES_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
@@ -51,10 +39,10 @@ export default function SeriesGenrePage() {
     setIsLoading(true);
     try {
       const offset = (page - 1) * ITEMS_PER_PAGE;
-      // Fetch all episodes of this genre
+      // Fetch all episodes of this genre first
+      // TODO: When search is implemented, pass searchTerm to getPlaylistItemsByGroup or filter results
       const episodeItemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, undefined, undefined, 'series_episode');
       
-      // Aggregate episodes into unique series cards
       const seriesMap = new Map<string, ContentItemForCard>();
       episodeItemsFromDB.forEach(episode => {
         const seriesKey = episode.seriesTitle || episode.title;
@@ -62,26 +50,24 @@ export default function SeriesGenrePage() {
 
         if (!seriesMap.has(seriesKey)) {
           seriesMap.set(seriesKey, {
-            id: episode.seriesTitle || episode.id!.toString(),
+            id: episode.seriesTitle || episode.id!.toString(), // Use seriesTitle as ID for aggregation, or first episode ID
             title: episode.seriesTitle || episode.title,
-            imageUrl: episode.logoUrl,
+            imageUrl: episode.logoUrl, 
             type: 'series',
             genre: episode.genre || episode.groupTitle,
             dataAiHint: `series ${episode.seriesTitle || episode.genre || ''}`.substring(0, 50).trim().toLowerCase(),
-            seriesId: episode.tvgId || episode.seriesTitle,
-            sourceCount: 0, // Count of episodes
+            seriesId: episode.tvgId || episode.seriesTitle, 
+            sourceCount: 0, 
           });
         }
         const seriesCard = seriesMap.get(seriesKey)!;
         seriesCard.sourceCount = (seriesCard.sourceCount || 0) + 1;
-        if (episode.logoUrl && (!seriesCard.imageUrl || episode.seasonNumber === 1 && episode.episodeNumber === 1)){
+        if (episode.logoUrl && (!seriesCard.imageUrl || (episode.seasonNumber === 1 && episode.episodeNumber === 1))){
             seriesCard.imageUrl = episode.logoUrl;
         }
       });
       
       const allUniqueSeriesForGenre = Array.from(seriesMap.values()).sort((a,b) => a.title.localeCompare(b.title));
-      
-      // Apply pagination to the aggregated series list
       const paginatedSeries = allUniqueSeriesForGenre.slice(offset, offset + ITEMS_PER_PAGE);
       
       setSeriesCardItems(prevItems => page === 1 ? paginatedSeries : [...prevItems, ...paginatedSeries]);
@@ -99,18 +85,18 @@ export default function SeriesGenrePage() {
     async function initialize() {
       setHasPlaylistsConfigured(null);
       setIsLoading(true);
+      setSeriesCardItems([]); 
+      setCurrentPage(1); 
+      setHasMore(true); 
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
           setActivePlaylistId(firstPlaylistId);
-          setSeriesCardItems([]); // Reset items
-          setCurrentPage(1);    // Reset page
           await fetchSeriesByGenre(firstPlaylistId, genreNameDecoded, 1);
         } else {
           setHasPlaylistsConfigured(false);
-          setSeriesCardItems([]);
         }
       } catch (error) {
         console.error("Failed to initialize series genre page:", error);
@@ -125,13 +111,13 @@ export default function SeriesGenrePage() {
         setIsLoading(false);
         setHasPlaylistsConfigured(false);
     }
-  }, [genreNameDecoded, fetchSeriesByGenre]);
+  }, [genreNameDecoded, fetchSeriesByGenre]); // fetchSeriesByGenre added as dependency
 
   const loadMoreItems = () => {
     if (activePlaylistId && hasMore && !isLoading) {
       const nextPage = currentPage + 1;
-      fetchSeriesByGenre(activePlaylistId, genreNameDecoded, nextPage);
       setCurrentPage(nextPage);
+      fetchSeriesByGenre(activePlaylistId, genreNameDecoded, nextPage);
     }
   };
   
@@ -171,13 +157,21 @@ export default function SeriesGenrePage() {
 
   return (
     <div className="container mx-auto px-0">
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <Button variant="outline" asChild>
           <Link href="/app/series">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Voltar para Gêneros de Séries
           </Link>
         </Button>
+        <Input 
+          type="search" 
+          placeholder={`Buscar em ${genreNameDecoded}...`} 
+          className="w-full sm:w-auto sm:max-w-xs"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          // TODO: Implement search logic
+        />
       </div>
       <PageHeader title={genreNameDecoded} description={`Explore as melhores séries de TV de ${genreNameDecoded}.`} />
       {hasPlaylistsConfigured ? (
@@ -185,7 +179,6 @@ export default function SeriesGenrePage() {
             <ContentGrid 
             items={seriesCardItems} 
             type="series" 
-            genre={genreNameDecoded} 
             isLoading={isLoading && seriesCardItems.length === 0}
             loadMoreItems={loadMoreItems}
             hasMore={hasMore}

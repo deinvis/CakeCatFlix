@@ -10,15 +10,15 @@ import { ChevronRight } from 'lucide-react';
 interface ContentGroupRowProps {
   title: string;
   items: ContentItemForCard[];
-  viewAllLink?: string; // Optional: if not provided, "View All" button won't show
-  itemType: 'movie' | 'series'; // To pass to ContentCard, though card now gets its own type
+  viewAllLink?: string; 
+  itemType: 'movie' | 'series' | 'channel'; // Added 'channel' for completeness, though not used here yet
 }
 
-const PREVIEW_ITEM_COUNT = 14; // Show more items in the scrollable row
+const PREVIEW_ITEM_COUNT = 6; // Adjusted to 6 as per user request
 
 export function ContentGroupRow({ title, items, viewAllLink, itemType }: ContentGroupRowProps) {
   if (!items || items.length === 0) {
-    return null; // Don't render if no items for this group
+    return null; 
   }
 
   const previewItems = items.slice(0, PREVIEW_ITEM_COUNT);
@@ -27,7 +27,7 @@ export function ContentGroupRow({ title, items, viewAllLink, itemType }: Content
     <section className="mb-8 md:mb-12">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl sm:text-2xl font-semibold text-foreground tracking-tight">{title}</h2>
-        {viewAllLink && items.length > 0 && ( // Only show View All if there are items and a link
+        {viewAllLink && items.length > 0 && ( 
           <Button variant="link" asChild className="text-primary hover:text-primary/80">
             <Link href={viewAllLink}>
               Ver Todos <ChevronRight className="h-4 w-4 ml-1" />
@@ -39,10 +39,10 @@ export function ContentGroupRow({ title, items, viewAllLink, itemType }: Content
         <div className="flex overflow-x-auto space-x-4 pb-4 scrollbar-thin scrollbar-thumb-muted-foreground/50 scrollbar-track-transparent">
           {previewItems.map(item => (
             <div key={item.id} className="w-[150px] sm:w-[160px] md:w-[180px] flex-shrink-0">
-              <ContentCard {...item} />
+              {/* Pass all item properties, including seriesId if present */}
+              <ContentCard {...item} /> 
             </div>
           ))}
-          {/* Optional: Could add a "View All" card at the end if many items */}
           {viewAllLink && items.length > previewItems.length && (
              <div className="w-[150px] sm:w-[160px] md:w-[180px] flex-shrink-0 flex items-center justify-center">
                 <Button variant="outline" asChild className="h-full w-full">
