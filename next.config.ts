@@ -13,40 +13,22 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
+        hostname: 'placehold.co', // Keep this specific one for placeholders
         port: '',
         pathname: '/**',
       },
       {
         protocol: 'https',
-        hostname: 'imgscc.top',
+        hostname: '**', // Allows any hostname over HTTPS
         port: '',
         pathname: '/**',
       },
       {
-        protocol: 'http', // Assuming some logos might be http
-        hostname: 'image.tmdb.org',
+        protocol: 'http',
+        hostname: '**', // Allows any hostname over HTTP
         port: '',
         pathname: '/**',
       },
-      {
-        protocol: 'https', // Assuming some logos might be http
-        hostname: 'image.tmdb.org',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'w7.pngwing.com',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'imagizer.imageshack.com',
-        port: '',
-        pathname: '/**',
-      }
     ],
   },
 };
