@@ -12,55 +12,54 @@ export function extractChannelDetails(name: string): { baseChannelName: string; 
   let workName = name.trim();
   const extractedQualities: string[] = [];
 
-  // Define explicit quality/codec patterns. Order can matter: longer/more specific first.
   const qualityCodecPatterns: { regex: RegExp; qualityLabel: string }[] = [
-    // Combined and specific (like 4K UHD)
-    { regex: /\b(4K\s*UHD|UHD\s*4K|4K|UHD)\b/gi, qualityLabel: "4K" },
+    { regex: /\b(4K\s*UHD|UHD\s*4K|4K|ULTRA\s*HD|UHD)\b/gi, qualityLabel: "4K" },
     { regex: /\b(FULL\s*HD|FULLHD|FHD|1080P|1080I)\b/gi, qualityLabel: "FHD" },
     { regex: /\b(HDTV|HD|720P|720I)\b/gi, qualityLabel: "HD" },
     { regex: /\b(SDTV|SD|576P|576I|480P|480I)\b/gi, qualityLabel: "SD" },
     { regex: /\b(H265|X265|H\.265|HEVC)\b/gi, qualityLabel: "H265" },
     { regex: /\b(H264|X264|H\.264|AVC)\b/gi, qualityLabel: "H264" },
-    // Special symbols often indicating quality variation or secondary stream
-    // Matches: ², ¹, ³, ⁰-⁹ (superscript numbers), ①-⑩ (circled numbers), ❶-❿ (dingbat circled numbers)
-    { regex: /([²¹³⁰¹²³⁴⁵⁶⁷⁸⁹]|[①②③④⑤⑥⑦⑧⑨⑩]|[❶❷❸❹❺❻❼❽❾❿])\b?/gi, qualityLabel: "$1" }
+    // Superscripts and circled numbers, more specific matching
+    { regex: /\b([²³¹⁰¹²³⁴⁵⁶⁷⁸⁹])\b/g, qualityLabel: "$1" }, 
+    { regex: /\b([①②③④⑤⑥⑦⑧⑨⑩])\b/g, qualityLabel: "$1" },
+    { regex: /\b([❶❷❸❹❺❻❼❽❾❿])\b/g, qualityLabel: "$1" },
   ];
-
 
   for (const { regex, qualityLabel } of qualityCodecPatterns) {
     workName = workName.replace(regex, (match, p1) => {
       let quality = qualityLabel;
-      if (p1 && qualityLabel.includes("$1") && qualityLabel !== "$1") { // Avoid if label is just the capture
-         quality = qualityLabel.replace("$1", p1.toUpperCase());
-      } else if (p1 && qualityLabel === "$1"){
-         quality = p1.toUpperCase();
+       if (p1 && qualityLabel.includes("$1")) { // If label uses captured group
+        quality = qualityLabel.replace("$1", p1.toUpperCase());
       }
-
       if (!extractedQualities.includes(quality.toUpperCase())) {
         extractedQualities.push(quality.toUpperCase());
       }
-      return ''; // Remove the matched part
+      return ''; 
     });
-    workName = workName.replace(/\s+/g, ' ').trim(); // Trim after each replacement
   }
-
-  // Clean up common separators only if they are now at the end or appear as multiple
-  workName = workName.replace(/[._\-\s]+$/g, '').trim();
-  workName = workName.replace(/^[._\-\s]+/g, '').trim();
   
+  // Clean up remaining common separators or characters often used with quality, but only if they are at the end
+  // and might have been left after specific quality tags were removed.
+  workName = workName.replace(/[._\-\s]+$/g, '').trim();
+  workName = workName.replace(/^[._\-\s]+/g, '').trim(); // Also from beginning
+
   // Remove parentheses/brackets only if they are now empty or surround only spaces
   workName = workName.replace(/\(\s*\)/g, '').trim();
   workName = workName.replace(/\[\s*\]/g, '').trim();
   
-  // Preserve channel names like "ESPN 2", "SPORTV 3"
-  // The main name part, including numbers that are part of the name, should remain.
-  // This logic assumes quality tags are already removed.
-  const baseChannelName = workName.replace(/\s+/g, ' ').trim(); // Normalize multiple internal spaces
+  let baseChannelName = workName.replace(/\s+/g, ' ').trim(); 
 
-  const finalBaseChannelName = baseChannelName || name.trim().split(/[|(]/)[0].trim();
+  // If baseChannelName is empty after all removals, fall back to the original name
+  // or a part of it, trying to be smarter.
+  if (!baseChannelName) {
+    const originalNameParts = name.trim().split(/[|(]/);
+    baseChannelName = originalNameParts[0].trim();
+    if (!baseChannelName) baseChannelName = name.trim(); // Ultimate fallback
+  }
+
   const finalQuality = extractedQualities.length > 0 ? extractedQualities.sort().join(' ').trim() : undefined;
 
-  return { baseChannelName: finalBaseChannelName.toUpperCase(), quality: finalQuality };
+  return { baseChannelName: baseChannelName.toUpperCase(), quality: finalQuality };
 }
 
 
@@ -96,7 +95,7 @@ export function extractSeriesDetails(titleFromM3U: string, streamUrl: string): {
       if (seasonStr) seasonNumber = parseInt(seasonStr, 10);
       if (episodeStr) episodeNumber = parseInt(episodeStr, 10);
       
-      if (seriesTitle.toUpperCase().startsWith(`S${String(seasonNumber||'').padStart(2,'0')}E${String(episodeNumber||'').padStart(2,'0')}`) || 
+      if (seriesTitle.toUpperCase().startsWith(`S${String(seasonNumber||'').padStart(2,'0')}E${String(episodeNumber||''}`) || 
           seriesTitle.toUpperCase().startsWith(`SEASON ${seasonNumber||''} EPISODE ${episodeNumber||''}`) ||
           seriesTitle.toUpperCase().startsWith(`${seasonNumber||''}X${episodeNumber||''}`)
       ) {
@@ -123,7 +122,7 @@ export function extractSeriesDetails(titleFromM3U: string, streamUrl: string): {
   }
 
   return {
-    seriesTitle: seriesTitle.trim(),
+    seriesTitle: seriesTitle.trim().toUpperCase(),
     seasonNumber,
     episodeNumber,
     episodeTitle: episodeTitle?.trim(),
@@ -163,64 +162,51 @@ export function normalizeGroupTitle(rawGroupTitle: string | undefined, itemTypeH
 
   let currentTitle = normalizeText(rawGroupTitle).toUpperCase(); // Normalize accents and case first
 
-  // More comprehensive list of prefixes, including those with numbers and separators
-  const prefixesToStrip = [
-    "CANAIS | ", "CANAL | ", "TV | ", "CHANNELS | ", "CHANNEL | ",
-    "FILMES | ", "FILME | ", "MOVIES | ", "MOVIE | ", "PELICULAS | ", "PELICULA | ",
-    "SERIES | ", "SÉRIES | ", "SERIE | ", "SÉRIE | ", "TV SERIES | ", "TV SHOWS | ", "WEB SERIES | ",
-    "ANIMES | ", "ANIME | ", "DORAMAS | ", "DORAMA | ",
-    "CANAIS:", "CANAL:", "TV:", "CHANNELS:", "CHANNEL:",
-    "FILMES:", "FILME:", "MOVIES:", "MOVIE:", "PELICULAS:", "PELICULA:",
-    "SERIES:", "SÉRIES:", "SERIE:", "SÉRIE:", "TV SERIES:", "WEB SERIES:",
-    "ANIMES:", "ANIME:", "DORAMAS:", "DORAMA:",
-    "CATEGORIA:", "GRUPO:", "GROUP:", "CATEGORY:", "TODOS OS ", "TODAS AS ", "ALL ",
-    // Generic terms after specific ones with separators
-    "CANAIS ", "CANAL ", "TV ", "CHANNELS ", "CHANNEL ",
-    "FILMES ", "FILME ", "MOVIES ", "MOVIE ", "PELICULAS ", "PELICULA ",
-    "SERIES ", "SÉRIES ", "SERIE ", "SÉRIE ", "TV SERIES ", "WEB SERIES ",
-    "ANIMES ", "ANIME ", "DORAMAS ", "DORAMA ",
-    // Numerical and hyphen/dash prefixes
-    /^\s*-\s*\d+\s*-\s*/, /^\s*-\s*\d+\s*/, 
-    /^\s*\d+\s*-\s*/, /^\s*\d+\s*–\s*/, // en-dash
-    /^\s*\d+\s*:\s*/, /^\s*\d+\s*\|\s*/,
-    /^\s*\d+\s+/, // Numbers followed by space
-    /^\s*-\s*/, // Leading hyphen and space
-    /^\s*\[\w+\]\s*/, // Prefixes like [BR]
+  const genericPrefixes = [
+    "CANAIS", "CANAL", "TV", "CHANNELS", "CHANNEL",
+    "FILMES", "FILME", "MOVIES", "MOVIE", "PELICULAS", "PELICULA",
+    "SERIES", "SÉRIES", "SERIE", "SÉRIE", "TV SERIES", "WEB SERIES", "DORAMAS", "DORAMA",
+    "ANIMES", "ANIME",
+    "CATEGORIA", "GRUPO", "GROUP", "CATEGORY", "TODOS OS", "TODAS AS", "ALL",
+    "LISTA", "LIST",
   ];
 
   let prefixStripped;
   do {
     prefixStripped = false;
-    for (const prefix of prefixesToStrip) {
-      if (typeof prefix === 'string') {
-        if (currentTitle.startsWith(prefix.toUpperCase())) {
-          currentTitle = currentTitle.substring(prefix.length).trim();
-          prefixStripped = true;
-          break; 
-        }
-      } else { // Regex prefix
-        const match = currentTitle.match(prefix);
-        if (match && currentTitle.startsWith(match[0])) {
-          currentTitle = currentTitle.substring(match[0].length).trim();
-          prefixStripped = true;
-          break;
-        }
+    for (const prefix of genericPrefixes) {
+      // Match prefix followed by common separators like space, |, :, -, or just the prefix itself if it's at the end of the string
+      const regex = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*[|:\\-–]\\s*|\\s+)?`, 'i');
+      const match = currentTitle.match(regex);
+      if (match) {
+        currentTitle = currentTitle.substring(match[0].length).trim();
+        prefixStripped = true;
+        break; 
       }
     }
   } while (prefixStripped && currentTitle !== '');
-  
-  // Replace all remaining pipe characters (and surrounding spaces) with a single space
-  currentTitle = currentTitle.replace(/\s*\|\s*/g, ' ').trim();
-  // Remove trailing slashes and then trim
-  currentTitle = currentTitle.replace(/\s*\/{1,}\s*$/g, '').trim();
+
+  // Remove leading numerical/hyphen prefixes like "1 - ", "- 1 ", "01.", etc.
+  currentTitle = currentTitle.replace(/^[\s._\-–]*\d+[\s._\-–:]*/, '').trim();
+  currentTitle = currentTitle.replace(/^[\s._\-–]+/, '').trim(); // Clean up any remaining leading separators
+
+  // Replace all remaining pipe characters (and surrounding spaces) or multiple hyphens/dashes with a single space
+  currentTitle = currentTitle.replace(/\s*[|]\s*/g, ' ').trim();
+  currentTitle = currentTitle.replace(/\s*[-–]{2,}\s*/g, ' ').trim(); // Multiple hyphens/dashes to one space
+
+  // Remove trailing slashes, hyphens, or dots
+  currentTitle = currentTitle.replace(/[\s\/\\._\-–]+$/g, '').trim();
+  // Remove leading slashes, hyphens, or dots (again after numerical prefix removal)
+  currentTitle = currentTitle.replace(/^[\s\/\\._\-–]+/g, '').trim();
 
 
-  // Remove common suffixes
+  // Remove common suffixes often related to quality or language, if not already handled
   const suffixesToRemove = [
     /\s\(ADULTOS\)$/i, /\sXXX$/, /\sADULTOS$/,
     /\s\(HD\)$/i, /\sHD$/, /\s\(FHD\)$/i, /\sFHD$/, /\s\(SD\)$/i, /\sSD$/,
     /\s\(4K\)$/i, /\s4K$/, /\s\(UHD\)$/i, /\sUHD$/,
     /\sPT-BR$/, /\sDUBLADO$/, /\sLEGENDADO$/, /\sLATINO$/,
+    /\sON DEMAND$/i, /\sVOD$/i
   ];
   for (const suffixRegex of suffixesToRemove) {
     currentTitle = currentTitle.replace(suffixRegex, '').trim();
@@ -231,14 +217,17 @@ export function normalizeGroupTitle(rawGroupTitle: string | undefined, itemTypeH
 
   if (currentTitle === '') {
     let fallback = normalizeText(rawGroupTitle).toUpperCase();
-    // Re-run a simplified prefix strip on fallback
-    for (const prefix of ["CANAIS | ", "FILMES | ", "SERIES | ", "CANAL ", "FILME ", "SERIE "]) {
-        if (fallback.startsWith(prefix.toUpperCase())) {
-            fallback = fallback.substring(prefix.length).trim();
+    for (const prefix of genericPrefixes) { // Simple re-strip for fallback
+        const regex = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*[|:\\-–]\\s*|\\s+)?`, 'i');
+        const match = fallback.match(regex);
+        if (match) {
+            fallback = fallback.substring(match[0].length).trim();
         }
     }
-    fallback = fallback.replace(/\s*\|\s*/g, ' ').trim();
-    fallback = fallback.replace(/\s*\/{1,}\s*$/g, '').trim();
+    fallback = fallback.replace(/^[\s._\-–]*\d+[\s._\-–:]*/, '').trim();
+    fallback = fallback.replace(/\s*[|]\s*/g, ' ').trim();
+    fallback = fallback.replace(/[\s\/\\._\-–]+$/g, '').trim();
+    fallback = fallback.replace(/^[\s\/\\._\-–]+/g, '').trim();
     fallback = fallback.replace(/\s+/g, ' ').trim();
 
     return fallback || (itemTypeHint === 'channel' ? 'CANAIS DIVERSOS' :
@@ -246,7 +235,6 @@ export function normalizeGroupTitle(rawGroupTitle: string | undefined, itemTypeH
                         itemTypeHint === 'series_episode' ? 'SÉRIES DIVERSAS' :
                         'OUTROS');
   }
-
   return currentTitle;
 }
 
@@ -279,52 +267,70 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
       if (!m3uTitleFromLine && currentRawAttributes['tvg-name']) {
         m3uTitleFromLine = currentRawAttributes['tvg-name'];
       } else if (!m3uTitleFromLine && !currentRawAttributes['tvg-name']) {
-        m3uTitleFromLine = "Título Desconhecido";
+         // Try to extract a title from the URL if all else fails for this line
+        const urlParts = streamUrlFromLine.split('/');
+        const lastUrlSegment = urlParts.pop() || '';
+        const titleFromUrl = lastUrlSegment.split('.')[0].replace(/[_.-]/g, ' ');
+        m3uTitleFromLine = titleFromUrl || "Título Desconhecido";
       }
 
     } else if (trimmedLine && !trimmedLine.startsWith('#') && !trimmedLine.startsWith('##')) {
       streamUrlFromLine = trimmedLine;
 
+      // If m3uTitleFromLine is still empty here, it means #EXTINF was missing a title and tvg-name
       if (!m3uTitleFromLine) { 
-         m3uTitleFromLine = streamUrlFromLine.split('/').pop() || "Título Desconhecido";
+         const urlParts = streamUrlFromLine.split('/');
+         const lastUrlSegment = urlParts.pop() || '';
+         const titleFromUrl = lastUrlSegment.split('.')[0].replace(/[_.-]/g, ' ');
+         m3uTitleFromLine = titleFromUrl || "Título Desconhecido";
       }
 
-      const titleForProcessing = m3uTitleFromLine; 
+      const titleForProcessing = m3uTitleFromLine;
       const tvgNameFromAttr = currentRawAttributes['tvg-name']?.trim();
       const originalGroupTitle = currentRawAttributes['group-title']?.trim();
       const lowerStreamUrl = streamUrlFromLine.toLowerCase();
-      const lowerTitleForProcessing = normalizeText(titleForProcessing);
-      const lowerOriginalGroupTitle = normalizeText(originalGroupTitle || "");
+      const lowerTitleForProcessing = normalizeText(titleForProcessing); // Normalized for keyword checking
+      const lowerOriginalGroupTitle = normalizeText(originalGroupTitle || ""); // Normalized for keyword checking
       
       let itemType: PlaylistItem['itemType'];
-      let extractedChannelDetails: { baseChannelName: string; quality?: string } = { baseChannelName: titleForProcessing, quality: undefined };
+      let extractedChannelDetails: { baseChannelName: string; quality?: string } | undefined;
       
-      const isChannelByName = () => lowerTitleForProcessing.includes('24h') || (titleForProcessing.match(/\b(FHD|HD|SD|4K|UHD|H265|H264|HEVC|AVC|1080P|720P)\b/i) || (titleForProcessing === titleForProcessing.toUpperCase() && titleForProcessing.length < 35 && !titleForProcessing.match(/\(\d{4}\)$/)));
-      const isSeriesByName = () => !!titleForProcessing.match(/[Ss]\d{1,3}[._\s-]*[EeXx]\d{1,3}/i);
+      // Heuristic: If a name looks like a channel (short, often all caps, may contain quality)
+      const isChannelLikeName = (name: string): boolean => {
+        const upperName = name.toUpperCase();
+        // Check for common quality indicators or if it's short and all caps
+        return /\b(FHD|HD|SD|4K|UHD)\b/.test(upperName) || (upperName === name && name.length < 35 && !name.match(/\(\d{4}\)$/));
+      };
+      const hasSeriesPattern = (name: string): boolean => !!name.match(/[Ss]\d{1,3}[._\s-]*[EeXx]\d{1,3}/i);
 
-      if (lowerStreamUrl.endsWith('.ts') || lowerOriginalGroupTitle.includes('canal') || lowerTitleForProcessing.includes('24h')) {
+
+      if (lowerStreamUrl.endsWith('.ts') || lowerStreamUrl.endsWith('.m3u8')) { // .m3u8 for HLS channels
         itemType = 'channel';
-        extractedChannelDetails = extractChannelDetails(titleForProcessing);
-      } else if (isSeriesByName()) {
+      } else if (lowerTitleForProcessing.includes('24h')) {
+        itemType = 'channel';
+      } else if (lowerOriginalGroupTitle.includes('canal')) {
+        itemType = 'channel';
+      } else if (hasSeriesPattern(titleForProcessing)) {
         itemType = 'series_episode';
-      } else if (isChannelByName() && !lowerOriginalGroupTitle.includes('filme') && !lowerOriginalGroupTitle.includes('serie')) {
-        itemType = 'channel';
-        extractedChannelDetails = extractChannelDetails(titleForProcessing);
+      } else if (lowerOriginalGroupTitle.includes('serie') || lowerOriginalGroupTitle.includes('dorama') || lowerOriginalGroupTitle.includes('anime')) {
+        itemType = 'series_episode';
       } else if (lowerStreamUrl.includes('.mp4') || lowerStreamUrl.includes('.mkv') || lowerStreamUrl.includes('.avi')) {
-        if (lowerOriginalGroupTitle.includes('serie') || lowerOriginalGroupTitle.includes('dorama') || lowerOriginalGroupTitle.includes('anime')) {
-          itemType = 'series_episode';
-        } else if (lowerOriginalGroupTitle.includes('filme') || lowerOriginalGroupTitle.includes('movie') || lowerOriginalGroupTitle.includes('pelicula')) {
+        if (isChannelLikeName(titleForProcessing) && !lowerOriginalGroupTitle.includes('filme')) {
+          itemType = 'channel';
+        } else if (lowerOriginalGroupTitle.includes('filme') || lowerOriginalGroupTitle.includes('movie') || lowerOriginalGroupTitle.includes('pelicula') || extractMovieYear(titleForProcessing) !== undefined) {
           itemType = 'movie';
-        } else if (extractMovieYear(titleForProcessing) !== undefined) {
-           itemType = 'movie';
-        } else {
-           itemType = 'movie'; 
+        } else { // If it's a video file and not clearly movie or channel, default to movie if no other strong indicator.
+          itemType = 'movie'; 
         }
       } else {
-        itemType = 'channel'; // Default for unknown stream types
-        extractedChannelDetails = extractChannelDetails(titleForProcessing);
+        // Default for unknown stream types, or if other heuristics point to channel
+        if (isChannelLikeName(titleForProcessing)) {
+            itemType = 'channel';
+        } else {
+            itemType = 'channel'; // Fallback default
+        }
       }
-
+      
       const item: Partial<PlaylistItem> = {
         playlistDbId,
         title: titleForProcessing, 
@@ -332,19 +338,20 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
         logoUrl: currentRawAttributes['tvg-logo'],
         originalGroupTitle: originalGroupTitle,
         tvgId: currentRawAttributes['tvg-id'],
-        tvgName: tvgNameFromAttr || titleForProcessing, // Fallback tvgName to title if not present
+        tvgName: tvgNameFromAttr || titleForProcessing, 
         itemType,
       };
       
       item.groupTitle = normalizeGroupTitle(originalGroupTitle, item.itemType);
 
       if (item.itemType === 'channel') {
-        item.baseChannelName = extractedChannelDetails.baseChannelName.toUpperCase();
+        extractedChannelDetails = extractChannelDetails(titleForProcessing);
+        item.baseChannelName = extractedChannelDetails.baseChannelName;
         item.quality = extractedChannelDetails.quality;
         item.genre = item.groupTitle; 
       } else if (item.itemType === 'series_episode') {
         const { seriesTitle, seasonNumber, episodeNumber, episodeTitle } = extractSeriesDetails(titleForProcessing, streamUrlFromLine);
-        item.seriesTitle = seriesTitle.toUpperCase();
+        item.seriesTitle = seriesTitle;
         item.seasonNumber = seasonNumber;
         item.episodeNumber = episodeNumber;
         item.title = episodeTitle || titleForProcessing; 
@@ -356,12 +363,6 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
       }
       
       if (item.streamUrl && item.title && item.itemType) {
-        if (item.itemType === 'channel' && !item.baseChannelName) {
-            item.baseChannelName = extractChannelDetails(item.title).baseChannelName.toUpperCase();
-        }
-        if (item.itemType === 'series_episode' && !item.seriesTitle) {
-            item.seriesTitle = extractSeriesDetails(item.title, item.streamUrl).seriesTitle.toUpperCase();
-        }
         items.push(item as PlaylistItem);
       }
 
@@ -372,5 +373,3 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
   }
   return items;
 }
-
-    
