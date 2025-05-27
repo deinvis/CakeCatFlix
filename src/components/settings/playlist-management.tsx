@@ -8,7 +8,7 @@ import {
   LOCALSTORAGE_STARTUP_PAGE_KEY, 
   LOCALSTORAGE_THEME_KEY, 
   LOCALSTORAGE_PARENTAL_CONTROL_KEY,
-  FILE_PLAYLIST_ITEM_LIMIT // This limit will also be applied by xtream-parser internally
+  FILE_PLAYLIST_ITEM_LIMIT
 } from '@/lib/constants';
 import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard } from 'lucide-react';
 import {
@@ -186,8 +186,10 @@ export function PlaylistManagement() {
       // Consider closing dialog only on success. This requires not using DialogClose asChild unconditionally.
       // For now, we assume it closes. If an error occurs, the toast shows, dialog might still close.
       // To prevent closing on error, DialogClose would need to be triggered manually.
-      const closeButton = document.querySelector('[data-radix-dialog-close]') as HTMLElement | null;
-      closeButton?.click();
+      const closeButton = document.querySelector('[data-radix-dialog-close="true"]') as HTMLElement | null;
+      if (closeButton) { // Ensure a more specific selector for the close button if needed
+          closeButton.click();
+      }
 
 
     } catch (error: any) {
@@ -349,7 +351,7 @@ export function PlaylistManagement() {
                   <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens do arquivo.</p>
                 </div>
                 <DialogFooter>
-                  <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
+                  <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
                   <Button type="button" onClick={() => handleAddNewPlaylist('file')} disabled={isLoading || !newPlaylistFile}>Adicionar do Arquivo</Button>
                 </DialogFooter>
               </TabsContent>
@@ -367,7 +369,7 @@ export function PlaylistManagement() {
                    <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens da URL. A URL deve permitir acesso direto (CORS habilitado).</p>
                 </div>
                  <DialogFooter>
-                  <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
+                  <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
                   <Button type="button" onClick={() => handleAddNewPlaylist('url')} disabled={isLoading || !newPlaylistUrl.trim()}>Adicionar da URL</Button>
                 </DialogFooter>
               </TabsContent>
@@ -388,7 +390,7 @@ export function PlaylistManagement() {
                    <p className="text-xs text-muted-foreground">Busca canais, filmes e séries. Limite de {FILE_PLAYLIST_ITEM_LIMIT} itens no total.</p>
                 </div>
                 <DialogFooter>
-                  <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
+                  <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
                   <Button type="button" onClick={() => handleAddNewPlaylist('xtream')} disabled={isLoading || !xtreamHost.trim() || !xtreamUser.trim() || !xtreamPassword.trim()}>Adicionar Xtream</Button>
                 </DialogFooter>
               </TabsContent>
@@ -400,7 +402,7 @@ export function PlaylistManagement() {
           </DialogContent>
         </Dialog>
 
-        {isLoading && (
+        {isLoading && !loadingMessage.startsWith('Carregando playlists...') && (
           <div className="flex items-center justify-center text-primary my-4 py-2">
             <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -456,7 +458,7 @@ export function PlaylistManagement() {
                               />
                             </div>
                             <DialogFooter>
-                              <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
+                              <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
                               <Button type="button" onClick={handleSaveEditPlaylist} disabled={isLoading || !editPlaylistName.trim()}>Salvar Mudanças</Button>
                             </DialogFooter>
                           </DialogContent>

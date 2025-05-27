@@ -1,3 +1,4 @@
+
 import type { LucideIcon } from 'lucide-react';
 import { Tv2, Film, Clapperboard, Settings as SettingsIcon, History, Heart } from 'lucide-react';
 
@@ -84,4 +85,6 @@ export const DB_VERSION = 1;
 export const PLAYLIST_METADATA_STORE = 'playlists';
 export const PLAYLIST_ITEMS_STORE = 'playlistItems';
 
-export const FILE_PLAYLIST_ITEM_LIMIT = 2000;
+export const FILE_PLAYLIST_ITEM_LIMIT = 50;
+
+    

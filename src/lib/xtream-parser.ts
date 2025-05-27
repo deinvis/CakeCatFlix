@@ -4,11 +4,12 @@
  * @fileOverview Xtream Codes API interaction and parsing logic.
  */
 import type { PlaylistItemCore, PlaylistMetadata } from '@/lib/constants';
+import { FILE_PLAYLIST_ITEM_LIMIT } from '@/lib/constants';
 
 const XTREAM_API_PATH = '/player_api.php';
 // Apply a limit to prevent fetching an overwhelming number of items from Xtream.
-// This can be adjusted. It's a safeguard.
-const XTREAM_ITEM_FETCH_LIMIT = 2000;
+// This limit is now sourced from constants.ts
+const XTREAM_ITEM_FETCH_LIMIT = FILE_PLAYLIST_ITEM_LIMIT;
 
 
 interface XtreamCategory {
@@ -216,3 +217,5 @@ export async function fetchXtreamPlaylistItems(
 
   return allItems.slice(0, XTREAM_ITEM_FETCH_LIMIT);
 }
+
+    
