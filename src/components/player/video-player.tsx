@@ -1,153 +1,163 @@
 
 "use client";
 
-import type { FC } from 'react';
-import React, { useRef, useEffect, useState } from 'react';
-import { WifiOff, AlertTriangle } from 'lucide-react'; // For no-source and error states
+import React, { useEffect, useRef, useState } from 'react';
+import { WifiOff } from 'lucide-react'; // For no video source
 
 interface VideoPlayerProps {
   src: string | null;
-  title?: string; // Kept for consistency, but not used in this diagnostic version's UI
+  title?: string; 
 }
 
-const VideoPlayer: FC<VideoPlayerProps> = ({ src, title = "Video" }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, title }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Add loading state
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
 
-    // Reset states when src changes
-    setError(null);
-    setIsLoading(true);
-    video.removeAttribute('src'); // Ensure previous source is cleared
-    try {
-      video.load(); // Reset media element
-    } catch (e) {
-      console.warn("[Diagnostic Player] Error calling video.load() on src change:", e);
-    }
+    setVideoError(null);
+    setIsLoading(true); // Assume loading initially when src changes
 
+    console.log(`[Diagnostic Player] Attempting to load src: ${src}`);
 
-    if (src) {
-      console.log(`[Diagnostic Player] Setting src: ${src}`);
-      video.src = src;
+    const handleError = () => {
+      const error = videoElement.error;
+      let message = "Unknown video error.";
+      let isSuspectedCorsOrNetworkIssue = false;
 
-      const handleError = () => {
-        const videoError = video.error;
-        let message = `Erro ao carregar o vídeo. Código: ${videoError?.code || 'desconhecido'}.`;
-        if (videoError) {
-          switch (videoError.code) {
-            case MediaError.MEDIA_ERR_ABORTED: message = "Reprodução abortada."; break;
-            case MediaError.MEDIA_ERR_NETWORK: message = "Erro de rede. Verifique a conexão."; break;
-            case MediaError.MEDIA_ERR_DECODE: message = "Erro de decodificação. Arquivo corrompido ou formato não suportado."; break;
-            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-              message = "Formato não suportado ou fonte inválida. Verifique o console do navegador para detalhes de CORS.";
-              break;
-          }
+      if (error) {
+        message = `Error Code: ${error.code}, Message: ${error.message || 'No specific message.'}`;
+        if (error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+          message += " (Format not supported or source error. Check console for CORS issues if it's an MP4 from another domain.)";
         }
-        console.error(`[Diagnostic Player] Video Error: `, videoError, `for src: ${src}`);
-        setError(message);
-        setIsLoading(false);
-      };
-
-      const handleCanPlay = () => {
-        console.log(`[Diagnostic Player] Video can play: ${src}`);
-        setError(null); // Clear error if it can play
-        setIsLoading(false);
-        // Optional: try to play if allowed by browser
-        // video.play().catch(e => console.warn("[Diagnostic Player] Autoplay after canplay was prevented:", e));
-      };
-
-      const handleLoadedMetadata = () => {
-        console.log(`[Diagnostic Player] Video metadata loaded: ${src}`);
-        setIsLoading(false);
-      };
-      
-      const handleWaiting = () => {
-        console.log(`[Diagnostic Player] Video waiting (buffering): ${src}`);
-        if (!error) setIsLoading(true); // Show loading only if no prior error
-      };
-
-      const handlePlaying = () => {
-        console.log(`[Diagnostic Player] Video playing: ${src}`);
-        setIsLoading(false);
-        setError(null);
-      };
-
-
-      video.addEventListener('error', handleError);
-      video.addEventListener('canplay', handleCanPlay);
-      video.addEventListener('loadedmetadata', handleLoadedMetadata);
-      video.addEventListener('waiting', handleWaiting);
-      video.addEventListener('playing', handlePlaying);
-
-
-      // Attempt to load the new source
-      try {
-        video.load(); // This might be redundant if setting src already triggers load, but can be explicit.
-      } catch (e) {
-         console.warn("[Diagnostic Player] Error calling video.load() after setting src:", e);
+        // Check if the error object is empty (common for CORS)
+        if (typeof error === 'object' && error !== null && Object.keys(error).length === 0 && error.constructor === Object) {
+          isSuspectedCorsOrNetworkIssue = true;
+          message = "Video could not be loaded. This might be a CORS issue on the video server or a network problem. Please check the browser console for more details.";
+        }
+      } else if (!src) {
+        // This case should ideally be handled before trying to set src
+        message = "No video source was provided to the player.";
+      } else {
+        // Generic error if video.error is null but an error event still fired
+        isSuspectedCorsOrNetworkIssue = true; // Treat as suspect if error object is missing but event fired
+        message = "An unexpected error occurred while trying to load the video. It might be a network issue or a problem with the video source (e.g. CORS).";
       }
-
-
-      return () => {
-        console.log(`[Diagnostic Player] Cleaning up for src: ${src}`);
-        video.removeEventListener('error', handleError);
-        video.removeEventListener('canplay', handleCanPlay);
-        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        video.removeEventListener('waiting', handleWaiting);
-        video.removeEventListener('playing', handlePlaying);
-        // Stop video and clear src to prevent playing in background on component unmount/src change
-        if (!video.paused) video.pause();
-        video.removeAttribute('src');
-        try {
-          video.load(); // This is a common way to reset the video element fully
-        } catch (e) {
-           console.warn("[Diagnostic Player] Error calling video.load() in cleanup:", e);
-        }
-
-      };
-    } else {
-      // Handle case where src is null or empty
+      
+      setVideoError(message);
+      if (isSuspectedCorsOrNetworkIssue) {
+        console.warn(`[Diagnostic Player] Suspected CORS/Network Video Error: `, error, `for src: ${src}`);
+      } else {
+        console.error(`[Diagnostic Player] Video Error: `, error, `for src: ${src}`);
+      }
       setIsLoading(false);
-      setError(null); // No error, just no source
+    };
+
+    const handleCanPlay = () => {
+      console.log(`[Diagnostic Player] Can play src: ${src}`);
+      setIsLoading(false);
+      setVideoError(null); // Clear any previous error
+      videoElement.play().catch(e => {
+        console.warn("[Diagnostic Player] Autoplay prevented:", e);
+        // User might need to click to play
+      });
+    };
+
+    const handleWaiting = () => {
+      console.log(`[Diagnostic Player] Waiting (buffering) for src: ${src}`);
+      if (!videoError) { // Don't show loading if there's already an error
+        setIsLoading(true);
+      }
+    };
+    
+    const handlePlaying = () => {
+      console.log(`[Diagnostic Player] Playing src: ${src}`);
+      setIsLoading(false);
+      setVideoError(null); // Clear error when playback starts/resumes
+    };
+
+    const handleLoadedMetadata = () => {
+      console.log(`[Diagnostic Player] Metadata loaded for src: ${src}`);
+      // Duration is now available: videoElement.duration
+      // We could set isLoading to false here if not already playing
+      if (!videoElement.paused) { // If it's already playing due to autoplay or previous canplay
+        setIsLoading(false);
+      }
+    };
+
+
+    videoElement.addEventListener('error', handleError);
+    videoElement.addEventListener('canplay', handleCanPlay);
+    videoElement.addEventListener('waiting', handleWaiting);
+    videoElement.addEventListener('playing', handlePlaying);
+    videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+
+    // Set src and load
+    if (src && src.trim() !== "") {
+      videoElement.src = src;
+      videoElement.load(); // Explicitly call load
+    } else {
+      setIsLoading(false);
+      setVideoError("No video source provided.");
+      console.warn("[Diagnostic Player] No valid src provided.");
+      videoElement.removeAttribute('src'); // Ensure no old src is lingering
+      try { videoElement.load(); } catch(e) {/*ignore*/}
     }
+
+    return () => {
+      videoElement.removeEventListener('error', handleError);
+      videoElement.removeEventListener('canplay', handleCanPlay);
+      videoElement.removeEventListener('waiting', handleWaiting);
+      videoElement.removeEventListener('playing', handlePlaying);
+      videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      
+      if (!videoElement.paused) {
+        videoElement.pause();
+      }
+      videoElement.removeAttribute('src');
+      try {
+        // This helps reset the video element, especially if it's in an error state.
+        videoElement.load(); 
+      } catch (e) { /* ignore potential errors on load in cleanup */ }
+      console.log(`[Diagnostic Player] Cleaned up for src: ${src}`);
+    };
   }, [src]);
 
-  if (!src) {
+  if (!src || src.trim() === "") {
     return (
-      <div className="w-full aspect-video bg-black text-muted-foreground flex flex-col items-center justify-center rounded-lg">
-        <WifiOff className="w-16 h-16 mb-4" />
+      <div className="aspect-video bg-black flex flex-col items-center justify-center text-muted-foreground rounded-lg p-4 text-center">
+        <WifiOff className="w-12 h-12 mb-2" />
         <p>Nenhuma fonte de vídeo selecionada.</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full aspect-video bg-black rounded-lg shadow-2xl relative group/player overflow-hidden">
+    <div className="aspect-video bg-black relative rounded-lg">
       <video
         ref={videoRef}
-        // src is set in useEffect to allow for cleanup and re-initialization
-        controls // Use browser's default controls for this test
+        controls // Use browser default controls for this diagnostic version
         className="w-full h-full"
         playsInline
-        // crossOrigin="anonymous" // Removed for this test to be as vanilla as possible
+        // crossOrigin="anonymous" // Best to omit unless specifically needed and server supports it
       >
         Seu navegador não suporta a tag de vídeo.
       </video>
-      {isLoading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10 pointer-events-none">
-           <div className="w-12 h-12 border-4 border-muted border-t-primary rounded-full animate-spin"></div>
-           <p className="text-primary-foreground ml-3">Carregando vídeo...</p>
+      {isLoading && !videoError && ( // Only show loading if no error
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 pointer-events-none">
+          <div className="w-10 h-10 border-4 border-muted border-t-primary rounded-full animate-spin"></div>
+          <p className="text-white ml-3">Carregando vídeo...</p>
         </div>
       )}
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-destructive/90 p-4 z-20 text-destructive-foreground text-center">
-            <AlertTriangle className="h-12 w-12 mb-3" />
-            <p className="text-lg font-semibold mb-1">Erro ao Carregar Vídeo</p>
-            <p className="text-sm max-w-md">{error}</p>
+      {videoError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-destructive/90 text-destructive-foreground p-4 text-center rounded-lg">
+          <p className="font-semibold text-lg mb-1">Erro ao Carregar Vídeo</p>
+          <p className="text-sm max-w-md">{videoError}</p>
+          <p className="text-xs mt-3 opacity-80">URL: {src}</p>
         </div>
       )}
     </div>
