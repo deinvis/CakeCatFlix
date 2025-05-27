@@ -379,85 +379,98 @@ export function PlaylistManagement() {
           </DialogContent>
         </Dialog>
 
-        {isLoading && playlists.length > 0 && <p className="text-muted-foreground text-center py-2">Atualizando playlists...</p>}
-        {!isLoading && playlists.length === 0 ? (
-          <p className="text-muted-foreground text-center py-4">Nenhuma playlist adicionada ainda. Clique em "Adicionar Nova Playlist" para começar.</p>
-        ) : (
-          <ul className="space-y-3">
-            {playlists.map((playlist) => (
-              <li key={playlist.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
-                <div className="flex-1 mb-2 sm:mb-0 mr-2">
-                  <span className="font-medium text-foreground truncate block" title={playlist.name}>
-                    {playlist.name}
-                    <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType})</span>
-                  </span>
-                  <div className="text-xs text-muted-foreground flex items-center space-x-2 mt-1">
-                    <span>Total: {playlist.itemCount ?? 0}</span>
-                    <Separator orientation="vertical" className="h-3 bg-border"/>
-                    <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1"/> {playlist.channelCount ?? 0}</span>
-                    <Separator orientation="vertical" className="h-3 bg-border"/>
-                    <span className="flex items-center"><Film className="h-3 w-3 mr-1"/> {playlist.movieCount ?? 0}</span>
-                    <Separator orientation="vertical" className="h-3 bg-border"/>
-                    <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1"/> {playlist.seriesCount ?? 0}</span>
-                  </div>
-                </div>
-                <div className="space-x-1 flex-shrink-0">
-                  <Dialog onOpenChange={(open) => { if(!open) setEditingPlaylist(null); }}>
-                    <DialogTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(playlist)} aria-label={`Editar ${playlist.name}`} disabled={isLoading}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    </DialogTrigger>
-                    {editingPlaylist && editingPlaylist.id === playlist.id && (
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Editar Playlist: {editingPlaylist.name}</DialogTitle>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-4">
-                          <Label htmlFor="edit-playlist-name">Novo Nome da Playlist</Label>
-                          <Input 
-                            id="edit-playlist-name" 
-                            value={editPlaylistName} 
-                            onChange={(e) => setEditPlaylistName(e.target.value)} 
-                            placeholder="Insira o novo nome"
-                            disabled={isLoading}
-                          />
-                        </div>
-                        <DialogFooter>
-                          <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                          <Button type="button" onClick={handleSaveEditPlaylist} disabled={isLoading || !editPlaylistName.trim()}>Salvar Mudanças</Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    )}
-                  </Dialog>
-                  
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(playlist)} aria-label={`Apagar ${playlist.name}`} disabled={isLoading}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    {playlistToDelete && playlistToDelete.id === playlist.id && (
-                       <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Esta ação não pode ser desfeita. Isso apagará permanentemente a playlist "{playlistToDelete?.name}" e todos os seus {playlistToDelete?.itemCount ?? 0} itens.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel onClick={() => setPlaylistToDelete(null)} disabled={isLoading}>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={confirmDeletePlaylist} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground" disabled={isLoading}>
-                            Apagar
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    )}
-                  </AlertDialog>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {isLoading && (
+          <div className="flex items-center justify-center text-primary my-4 py-2">
+            <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p className="text-sm">Processando sua solicitação...</p>
+          </div>
+        )}
+
+        {!isLoading && (
+          <>
+            {playlists.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">Nenhuma playlist adicionada ainda. Clique em "Adicionar Nova Playlist" para começar.</p>
+            ) : (
+              <ul className="space-y-3">
+                {playlists.map((playlist) => (
+                  <li key={playlist.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
+                    <div className="flex-1 mb-2 sm:mb-0 mr-2">
+                      <span className="font-medium text-foreground truncate block" title={playlist.name}>
+                        {playlist.name}
+                        <span className="text-xs text-muted-foreground ml-2">({playlist.sourceType})</span>
+                      </span>
+                      <div className="text-xs text-muted-foreground flex items-center space-x-2 mt-1">
+                        <span>Total: {playlist.itemCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border"/>
+                        <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1"/> {playlist.channelCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border"/>
+                        <span className="flex items-center"><Film className="h-3 w-3 mr-1"/> {playlist.movieCount ?? 0}</span>
+                        <Separator orientation="vertical" className="h-3 bg-border"/>
+                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1"/> {playlist.seriesCount ?? 0}</span>
+                      </div>
+                    </div>
+                    <div className="space-x-1 flex-shrink-0">
+                      <Dialog onOpenChange={(open) => { if(!open) setEditingPlaylist(null); }}>
+                        <DialogTrigger asChild>
+                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(playlist)} aria-label={`Editar ${playlist.name}`} disabled={isLoading}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </DialogTrigger>
+                        {editingPlaylist && editingPlaylist.id === playlist.id && (
+                          <DialogContent>
+                            <DialogHeader>
+                              <DialogTitle>Editar Playlist: {editingPlaylist.name}</DialogTitle>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4">
+                              <Label htmlFor="edit-playlist-name">Novo Nome da Playlist</Label>
+                              <Input 
+                                id="edit-playlist-name" 
+                                value={editPlaylistName} 
+                                onChange={(e) => setEditPlaylistName(e.target.value)} 
+                                placeholder="Insira o novo nome"
+                                disabled={isLoading}
+                              />
+                            </div>
+                            <DialogFooter>
+                              <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
+                              <Button type="button" onClick={handleSaveEditPlaylist} disabled={isLoading || !editPlaylistName.trim()}>Salvar Mudanças</Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        )}
+                      </Dialog>
+                      
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" onClick={() => openDeleteDialog(playlist)} aria-label={`Apagar ${playlist.name}`} disabled={isLoading}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        {playlistToDelete && playlistToDelete.id === playlist.id && (
+                           <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Esta ação não pode ser desfeita. Isso apagará permanentemente a playlist "{playlistToDelete?.name}" e todos os seus {playlistToDelete?.itemCount ?? 0} itens.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel onClick={() => setPlaylistToDelete(null)} disabled={isLoading}>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction onClick={confirmDeletePlaylist} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground" disabled={isLoading}>
+                                Apagar
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        )}
+                      </AlertDialog>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
         
         <Separator className="my-8" />
