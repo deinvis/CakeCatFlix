@@ -15,24 +15,24 @@ import {
   getSeriesItemById, 
   getEpisodesForSeriesAcrossPlaylists, 
   getAllPlaylistsMetadata, 
-  getPlaylistMetadata 
 } from '@/lib/db';
-import type { SeriesItem, EpisodeItem, PlaylistMetadata } from '@/lib/constants';
+import type { SeriesItem, EpisodeItem, PlaylistMetadata, MediaItemForPlayer } from '@/lib/constants';
 
 interface EpisodeSource {
   playlistId: string;
   playlistName: string;
   streamUrl: string;
-  logoUrl?: string; // Episode specific logo from this source
+  logoUrl?: string;
 }
 
 interface DisplayEpisode {
-  title: string; // e.g., "S01E01 - Pilot"
+  id: string; // Unique ID for this display episode, e.g., seriesId_S<season>E<episode>
+  dbEpisodeId?: number; // Original EpisodeItem.id from DB if needed
+  title: string; 
   seasonNumber: number;
   episodeNumber: number;
   sources: EpisodeSource[];
-  // Potentially other shared metadata if consistent across sources
-  primaryLogoUrl?: string; // A representative logo for the episode
+  primaryLogoUrl?: string;
 }
 
 interface GroupedEpisodes {
@@ -42,18 +42,30 @@ interface GroupedEpisodes {
 export default function SeriesPlayerPage() {
   const params = useParams<{ seriesId: string }>();
   const router = useRouter();
-  const seriesNumericId = parseInt(params.seriesId, 10);
+  const seriesNumericId = useMemo(() => parseInt(params.seriesId, 10), [params.seriesId]);
 
   const [seriesInfo, setSeriesInfo] = useState<SeriesItem | null>(null);
   const [allRawEpisodes, setAllRawEpisodes] = useState<EpisodeItem[]>([]);
   const [playlistMetas, setPlaylistMetas] = useState<Map<string, PlaylistMetadata>>(new Map());
   
-  const [selectedSeason, setSelectedSeason] = useState<string | null>(null); // Season number as string for Tabs
-  const [currentStreamUrl, setCurrentStreamUrl] = useState<string | null>(null);
-  const [currentEpisodeTitle, setCurrentEpisodeTitle] = useState<string | null>(null);
+  const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
+  const [selectedDisplayEpisode, setSelectedDisplayEpisode] = useState<DisplayEpisode | null>(null);
+  const [selectedSourceStreamUrl, setSelectedSourceStreamUrl] = useState<string | null>(null);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const mediaItemForPlayer: MediaItemForPlayer | null = useMemo(() => {
+    if (!selectedDisplayEpisode || !selectedSourceStreamUrl || !seriesInfo) return null;
+    return {
+      id: selectedDisplayEpisode.id, // Use o ID único do DisplayEpisode
+      streamUrl: selectedSourceStreamUrl,
+      title: `${seriesInfo.title} - ${selectedDisplayEpisode.title}`,
+      type: 'series_episode', // Especifica que é um episódio
+      posterUrl: selectedDisplayEpisode.primaryLogoUrl || seriesInfo.logoUrl,
+    };
+  }, [selectedDisplayEpisode, selectedSourceStreamUrl, seriesInfo]);
+
 
   const fetchSeriesData = useCallback(async () => {
     if (isNaN(seriesNumericId)) {
@@ -81,7 +93,6 @@ export default function SeriesPlayerPage() {
       setAllRawEpisodes(episodesData);
 
       if (episodesData.length > 0) {
-        // Determine default season to select
         const firstSeason = episodesData.reduce((min, ep) => Math.min(min, ep.seasonNumber || Infinity), Infinity);
         if (firstSeason !== Infinity) {
           setSelectedSeason(firstSeason.toString());
@@ -102,12 +113,12 @@ export default function SeriesPlayerPage() {
 
   const groupedAndSortedEpisodes = useMemo(() => {
     const groups: GroupedEpisodes = {};
-    const episodeMap = new Map<string, DisplayEpisode>(); // Key: "S<season>E<episode>"
+    const episodeMap = new Map<string, DisplayEpisode>(); 
 
     allRawEpisodes.forEach(rawEp => {
       if (rawEp.seasonNumber === undefined || rawEp.episodeNumber === undefined) return;
 
-      const episodeKey = `S${rawEp.seasonNumber}E${rawEp.episodeNumber}`;
+      const episodeKey = `S${String(rawEp.seasonNumber).padStart(2, '0')}E${String(rawEp.episodeNumber).padStart(2, '0')}`;
       const playlistName = playlistMetas.get(rawEp.playlistDbId)?.name || `Fonte ${rawEp.playlistDbId.slice(-4)}`;
       const source: EpisodeSource = {
         playlistId: rawEp.playlistDbId,
@@ -124,7 +135,9 @@ export default function SeriesPlayerPage() {
         }
       } else {
         episodeMap.set(episodeKey, {
-          title: rawEp.title, // This should be the episode-specific title
+          id: `${seriesNumericId}_${episodeKey}`, // ID único para o DisplayEpisode
+          dbEpisodeId: rawEp.id,
+          title: rawEp.title, 
           seasonNumber: rawEp.seasonNumber,
           episodeNumber: rawEp.episodeNumber,
           sources: [source],
@@ -140,41 +153,39 @@ export default function SeriesPlayerPage() {
       groups[displayEp.seasonNumber].push(displayEp);
     });
 
-    // Sort episodes within each season
     for (const season in groups) {
       groups[season].sort((a, b) => a.episodeNumber - b.episodeNumber);
     }
     return groups;
-  }, [allRawEpisodes, playlistMetas, seriesInfo?.logoUrl]);
+  }, [allRawEpisodes, playlistMetas, seriesInfo?.logoUrl, seriesNumericId]);
 
   const availableSeasons = useMemo(() => {
     return Object.keys(groupedAndSortedEpisodes).map(Number).sort((a,b) => a - b);
   }, [groupedAndSortedEpisodes]);
 
   const handleEpisodePlay = (episode: DisplayEpisode, sourceStreamUrl?: string) => {
+    setSelectedDisplayEpisode(episode);
     if (sourceStreamUrl) {
-      setCurrentStreamUrl(sourceStreamUrl);
-      setCurrentEpisodeTitle(`${seriesInfo?.title || 'Série'} - ${episode.title}`);
-    } else if (episode.sources.length === 1) {
-      setCurrentStreamUrl(episode.sources[0].streamUrl);
-      setCurrentEpisodeTitle(`${seriesInfo?.title || 'Série'} - ${episode.title}`);
+      setSelectedSourceStreamUrl(sourceStreamUrl);
     } else if (episode.sources.length > 0) {
-      // If multiple sources and none pre-selected, default to the first one
-      // Or ideally, this case is handled by the source selector for the episode
-      setCurrentStreamUrl(episode.sources[0].streamUrl); 
-      setCurrentEpisodeTitle(`${seriesInfo?.title || 'Série'} - ${episode.title} (${episode.sources[0].playlistName})`);
+      setSelectedSourceStreamUrl(episode.sources[0].streamUrl); // Default to first source
     }
   };
   
-  // Auto-play first episode of selected season
   useEffect(() => {
     if (selectedSeason && groupedAndSortedEpisodes[parseInt(selectedSeason)]?.length > 0) {
       const firstEpisodeOfSeason = groupedAndSortedEpisodes[parseInt(selectedSeason)][0];
-      if (firstEpisodeOfSeason && !currentStreamUrl) { // Only if nothing is playing yet
+      if (firstEpisodeOfSeason && !selectedDisplayEpisode) { 
          handleEpisodePlay(firstEpisodeOfSeason);
       }
+    } else if (!selectedSeason && availableSeasons.length > 0) {
+        // Se nenhuma temporada estiver selecionada mas houver temporadas, selecione a primeira
+        const firstAvailableSeason = availableSeasons[0].toString();
+        setSelectedSeason(firstAvailableSeason);
+        // O efeito acima será acionado novamente para tocar o primeiro episódio da primeira temporada
     }
-  }, [selectedSeason, groupedAndSortedEpisodes, currentStreamUrl]);
+
+  }, [selectedSeason, groupedAndSortedEpisodes, selectedDisplayEpisode, availableSeasons]);
 
 
   if (isLoading && !seriesInfo) {
@@ -218,6 +229,7 @@ export default function SeriesPlayerPage() {
   }
 
   const episodesInSelectedSeason = selectedSeason ? groupedAndSortedEpisodes[parseInt(selectedSeason)] || [] : [];
+  const currentEpisodeFullTitle = mediaItemForPlayer?.title || seriesInfo.title;
 
   return (
     <div className="container mx-auto p-0 md:p-2 lg:p-4 space-y-4 md:space-y-6">
@@ -228,7 +240,7 @@ export default function SeriesPlayerPage() {
           )}
           <div className="flex-1">
             <PageHeader title={seriesInfo.title} description={seriesInfo.genre || seriesInfo.groupTitle || 'Série de TV'} />
-            {currentEpisodeTitle && <p className="text-sm text-muted-foreground -mt-4 mb-2 truncate" title={currentEpisodeTitle}>{currentEpisodeTitle}</p>}
+            {selectedDisplayEpisode && <p className="text-sm text-muted-foreground -mt-4 mb-2 truncate" title={currentEpisodeFullTitle}>{currentEpisodeFullTitle}</p>}
           </div>
         </div>
         <Button variant="outline" onClick={() => router.back()} className="flex-shrink-0 self-start sm:self-center">
@@ -236,7 +248,7 @@ export default function SeriesPlayerPage() {
         </Button>
       </div>
 
-      <VideoPlayer streamUrl={currentStreamUrl} />
+      <VideoPlayer item={mediaItemForPlayer} />
 
       <Tabs value={selectedSeason || undefined} onValueChange={setSelectedSeason} className="w-full">
         <ScrollArea className="w-full whitespace-nowrap rounded-md border">
@@ -252,24 +264,24 @@ export default function SeriesPlayerPage() {
 
         {availableSeasons.map(seasonNum => (
           <TabsContent key={seasonNum} value={seasonNum.toString()} className="mt-0">
-            {selectedSeason === seasonNum.toString() && (
+            {selectedSeason === seasonNum.toString() && ( // Renderiza apenas o conteúdo da aba ativa
               <ScrollArea className="h-[300px] w-full rounded-md border p-1 md:p-2">
                 {episodesInSelectedSeason.length > 0 ? (
                   <ul className="space-y-1">
                     {episodesInSelectedSeason.map((ep, idx) => (
-                      <li key={`${ep.seasonNumber}-${ep.episodeNumber}-${idx}`} 
-                          className="p-2.5 rounded-md hover:bg-muted/50 transition-colors group">
+                      <li key={ep.id} 
+                          className={`p-2.5 rounded-md hover:bg-muted/50 transition-colors group ${selectedDisplayEpisode?.id === ep.id ? 'bg-primary/10 ring-1 ring-primary' : ''}`}>
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                             <div className="flex-1 min-w-0">
                                 <button 
                                     onClick={() => handleEpisodePlay(ep)} 
                                     disabled={ep.sources.length === 0}
-                                    className="text-sm font-medium text-left w-full disabled:opacity-50 hover:text-primary truncate block"
+                                    className={`text-sm font-medium text-left w-full disabled:opacity-50 hover:text-primary truncate block ${selectedDisplayEpisode?.id === ep.id ? 'text-primary' : ''}`}
                                     title={ep.title}
                                 >
                                     Ep. {ep.episodeNumber}: {ep.title}
                                 </button>
-                                {ep.primaryLogoUrl && seriesInfo.logoUrl !== ep.primaryLogoUrl && ( // Show episode thumb if different from series
+                                {ep.primaryLogoUrl && seriesInfo.logoUrl !== ep.primaryLogoUrl && (
                                     <img src={ep.primaryLogoUrl} alt={`Thumbnail ${ep.title}`} className="h-10 w-auto rounded mt-1 opacity-70 group-hover:opacity-100" onError={(e) => e.currentTarget.style.display = 'none'}/>
                                 )}
                             </div>
@@ -277,7 +289,8 @@ export default function SeriesPlayerPage() {
                           {ep.sources.length > 1 && (
                             <Select 
                                 onValueChange={(streamUrl) => handleEpisodePlay(ep, streamUrl)}
-                                defaultValue={ep.sources[0].streamUrl}
+                                defaultValue={selectedDisplayEpisode?.id === ep.id && selectedSourceStreamUrl ? selectedSourceStreamUrl : ep.sources[0].streamUrl}
+                                value={selectedDisplayEpisode?.id === ep.id ? selectedSourceStreamUrl || undefined : ep.sources[0].streamUrl}
                             >
                               <SelectTrigger className="w-full sm:w-[180px] h-9 text-xs mt-1 sm:mt-0">
                                 <SelectValue placeholder="Selecionar Fonte" />
@@ -296,7 +309,7 @@ export default function SeriesPlayerPage() {
                           )}
                            {ep.sources.length === 1 && (
                                <Button 
-                                    variant="ghost" 
+                                    variant={selectedDisplayEpisode?.id === ep.id ? "default" : "ghost"}
                                     size="sm" 
                                     onClick={() => handleEpisodePlay(ep)}
                                     className="w-full sm:w-auto text-xs h-9 mt-1 sm:mt-0"
@@ -322,3 +335,5 @@ export default function SeriesPlayerPage() {
     </div>
   );
 }
+
+    

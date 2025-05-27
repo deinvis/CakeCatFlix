@@ -3,46 +3,24 @@
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import Hls from 'hls.js';
+import type { MediaItemForPlayer } from '@/lib/constants'; // Usando a nova interface
+// import { usePlaylistStore } from '@/store/playlistStore'; // Comentado por enquanto
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle, WifiOff } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
 
 interface VideoPlayerProps {
-  streamUrl: string | null;
-  itemId?: string | number;
-  itemType?: 'movie' | 'series' | 'channel';
-  itemTitle?: string;
-  posterUrl?: string;
+  item: MediaItemForPlayer | null; // Recebe um único objeto item ou null
 }
 
-const TEST_STREAMS = {
-  NONE: 'none',
-  HLS_BIG_BUCK_BUNNY: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-  MP4_BIG_BUCK_BUNNY: 'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4',
-};
-
-export function VideoPlayer({
-  streamUrl: propStreamUrl,
-  itemId,
-  itemType,
-  itemTitle,
-  posterUrl
-}: VideoPlayerProps) {
+export function VideoPlayer({ item }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [currentTestStream, setCurrentTestStream] = useState<string>(TEST_STREAMS.NONE);
+  const [isLoading, setIsLoading] = useState(true); // Adicionado para feedback de carregamento
 
-  const streamUrlToPlay = currentTestStream === TEST_STREAMS.NONE ? propStreamUrl : currentTestStream;
-  
-  const currentItemTitleForLogs = currentTestStream === TEST_STREAMS.NONE ? (itemTitle || "N/A") :
-                           currentTestStream === TEST_STREAMS.HLS_BIG_BUCK_BUNNY ? "Test HLS (Big Buck Bunny)" :
-                           currentTestStream === TEST_STREAMS.MP4_BIG_BUCK_BUNNY ? "Test MP4 (Big Buck Bunny)" : "Test Stream";
+  // const { updatePlaybackProgress, getPlaybackProgress } = usePlaylistStore(); // Comentado
 
-
-  const logMediaError = useCallback((context: string, error: MediaError | null, currentStreamUrlForLog?: string) => {
+  const logMediaError = useCallback((context: string, error: MediaError | null, streamUrl?: string) => {
     let userFriendlyMessage = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
     const consoleLogFn = error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ? console.warn : console.error;
 
@@ -65,31 +43,30 @@ export function VideoPlayer({
           break;
         case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: // code 4
           details += ' (O recurso de mídia especificado não era adequado ou o formato não é suportado.)';
-          userFriendlyMessage = `Formato de vídeo não suportado ou fonte inválida. Verifique o console do navegador (F12) para possíveis erros de CORS ou rede. URL: ${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}`;
-          if (currentStreamUrlForLog && currentStreamUrlForLog.toLowerCase().endsWith('.ts')) {
+          userFriendlyMessage = `Formato de vídeo não suportado ou fonte inválida. Verifique o console do navegador (F12) para possíveis erros de CORS ou rede. URL: ${streamUrl ? streamUrl.slice(0,70)+'...' : 'N/A'}`;
+          if (streamUrl && streamUrl.toLowerCase().endsWith('.ts')) {
             userFriendlyMessage += " Streams .ts podem ter compatibilidade limitada no navegador.";
+          }
+          if (streamUrl && streamUrl.toLowerCase().endsWith('.mp4')) {
+            userFriendlyMessage += " Para arquivos MP4, isso frequentemente ocorre devido a restrições de CORS no servidor do vídeo ou problemas de rede. Tente abrir a URL do vídeo diretamente em outra aba do navegador.";
           }
           break;
         default:
           details += ` (Código de erro desconhecido: ${error.code}).`;
-          userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador para detalhes. (Código: ${error.code || 'N/A'})`;
+          userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${streamUrl ? streamUrl.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador para detalhes. (Código: ${error.code || 'N/A'})`;
       }
-      const suspectedCorsIssue = error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && currentStreamUrlForLog && !currentStreamUrlForLog.toLowerCase().includes('.m3u8');
-      if (suspectedCorsIssue) {
-        userFriendlyMessage += " Problemas de CORS são comuns com arquivos de vídeo diretos. Verifique o console para mais detalhes.";
-      }
-      consoleLogFn(`${context}: ${details}`, error, "URL:", currentStreamUrlForLog);
+      consoleLogFn(`${context}: ${details}`, error, "URL:", streamUrl);
     } else {
-      const suspectedCorsMessage = currentStreamUrlForLog?.toLowerCase().endsWith('.mp4') ? " Isso frequentemente ocorre devido a restrições de CORS no servidor do vídeo." : "";
-      userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador (F12) para detalhes (CORS, rede).${suspectedCorsMessage}`;
-      consoleLogFn(`${context}: Erro não especificado ou video.error nulo. URL: ${currentStreamUrlForLog}`);
+      const suspectedCorsMessage = streamUrl?.toLowerCase().endsWith('.mp4') ? " Isso frequentemente ocorre devido a restrições de CORS no servidor do vídeo." : "";
+      userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${streamUrl ? streamUrl.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador (F12) para detalhes (CORS, rede).${suspectedCorsMessage}`;
+      consoleLogFn(`${context}: Erro não especificado ou video.error nulo. URL: ${streamUrl}`);
     }
     setPlayerError(userFriendlyMessage);
     setIsLoading(false);
   }, [setPlayerError, setIsLoading]);
 
   const tryPlay = useCallback((element: HTMLVideoElement, sourceDescription: string) => {
-    console.log(`VideoPlayer: Tentando reproduzir: ${sourceDescription} (URL: ${element.src || streamUrlToPlay})`);
+    console.log(`VideoPlayer: Tentando reproduzir: ${sourceDescription} para URL: ${element.src || item?.streamUrl}`);
     setIsLoading(true);
     element.play()
       .then(() => {
@@ -102,38 +79,57 @@ export function VideoPlayer({
           setPlayerError("A reprodução automática foi bloqueada. Clique no play para iniciar.");
         } else {
           console.error(`VideoPlayer: Play promise rejeitado com erro inesperado para ${sourceDescription}:`, playError);
-          logMediaError(`VideoPlayer Erro no play() para ${currentItemTitleForLogs} (${streamUrlToPlay})`, playError as any, streamUrlToPlay);
+          logMediaError(`VideoPlayer Erro no play() para ${item?.title || 'N/A'} (${item?.streamUrl})`, playError as any, item?.streamUrl);
         }
          setIsLoading(false);
       });
-  }, [streamUrlToPlay, currentItemTitleForLogs, logMediaError, setIsLoading, setPlayerError]);
+  }, [item, logMediaError, setIsLoading, setPlayerError]); // Adicionado item às dependências
 
-  const setupVideoEventListeners = useCallback((videoElement: HTMLVideoElement, playerContext: string) => {
+  // const handleTimeUpdate = useCallback(() => { // Comentado por enquanto
+  //   const videoElement = videoRef.current;
+  //   if (videoElement && item && (item.type === 'movie' || item.type === 'series_episode')) {
+  //     if (videoElement.duration && videoElement.currentTime) {
+  //        updatePlaybackProgress(item.id, videoElement.currentTime, videoElement.duration);
+  //     }
+  //   }
+  // }, [item, updatePlaybackProgress]);
+
+  const setupVideoEventListeners = useCallback((videoElement: HTMLVideoElement, playerType: 'HLS' | 'Default') => {
+    const currentItemTitle = item?.title || 'N/A';
+    const currentStreamUrl = item?.streamUrl || 'N/A';
+
     const onLoadedMetadata = () => {
-      console.log(`VideoPlayer (${playerContext}): Metadados carregados para`, streamUrlToPlay);
+      console.log(`VideoPlayer (${playerType}): Metadados carregados para`, currentStreamUrl);
       setPlayerError(null); 
-      tryPlay(videoElement, `${playerContext} stream (onloadedmetadata)`);
+      // if (item && (item.type === 'movie' || item.type === 'series_episode')) { // Comentado
+      //   const savedProgress = getPlaybackProgress(item.id);
+      //   if (savedProgress && videoElement.duration > 0 && videoElement.currentTime < savedProgress.currentTime && savedProgress.currentTime < videoElement.duration -1 ) { 
+      //     console.log(`VideoPlayer (${playerType}): Retomando VOD item "${item.title}" de ${savedProgress.currentTime}s`);
+      //     videoElement.currentTime = savedProgress.currentTime;
+      //   }
+      // }
+      tryPlay(videoElement, `${playerType} stream (loadedmetadata event): ${currentStreamUrl}`);
     };
 
     const onError = () => {
-      logMediaError(`VideoPlayer (${playerContext}) Erro no elemento <video> para ${currentItemTitleForLogs} (${streamUrlToPlay})`, videoElement.error, streamUrlToPlay);
+      logMediaError(`VideoPlayer (${playerType}) Erro para ${currentItemTitle} (${currentStreamUrl})`, videoElement.error, currentStreamUrl);
     };
-
+    
     const onPlaying = () => {
-      console.log(`VideoPlayer (${playerContext}): Reprodução iniciada para ${streamUrlToPlay}`);
+      console.log(`VideoPlayer (${playerType}): Reprodução iniciada para ${currentStreamUrl}`);
       setIsLoading(false);
       setPlayerError(null);
     };
     
     const onWaiting = () => {
-      console.log(`VideoPlayer (${playerContext}): Aguardando dados (buffering) para ${streamUrlToPlay}`);
+      console.log(`VideoPlayer (${playerType}): Aguardando dados (buffering) para ${currentStreamUrl}`);
       if (!playerError) setIsLoading(true); 
     };
 
     const onCanPlay = () => {
-      console.log(`VideoPlayer (${playerContext}): Pode reproduzir para ${streamUrlToPlay}`);
+      console.log(`VideoPlayer (${playerType}): Pode reproduzir para ${currentStreamUrl}`);
        if (!playerError && videoElement.paused) { 
-            // setIsLoading(false); // Autoplay might be blocked
+            // setIsLoading(false); 
        } else if (!playerError) {
             setIsLoading(false);
        }
@@ -144,6 +140,9 @@ export function VideoPlayer({
     videoElement.addEventListener('playing', onPlaying);
     videoElement.addEventListener('waiting', onWaiting);
     videoElement.addEventListener('canplay', onCanPlay);
+    // if (item && (item.type === 'movie' || item.type === 'series_episode')) { // Comentado
+    //   videoElement.addEventListener('timeupdate', handleTimeUpdate);
+    // }
 
     return () => {
       videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -151,24 +150,27 @@ export function VideoPlayer({
       videoElement.removeEventListener('playing', onPlaying);
       videoElement.removeEventListener('waiting', onWaiting);
       videoElement.removeEventListener('canplay', onCanPlay);
+      // if (item && (item.type === 'movie' || item.type === 'series_episode')) { // Comentado
+      //   videoElement.removeEventListener('timeupdate', handleTimeUpdate);
+      // }
     };
-  }, [streamUrlToPlay, currentItemTitleForLogs, tryPlay, logMediaError, setIsLoading, setPlayerError]);
+  }, [item, tryPlay, logMediaError, setIsLoading, setPlayerError]); // getPlaybackProgress, handleTimeUpdate removidos das deps
+
 
   useEffect(() => {
-    // Make the initial log more robust to potentially undefined props for clarity
-    const logTitle = itemTitle || "N/A";
-    const logType = itemType || "Desconhecido";
-    const logId = itemId || "N/A";
-    console.log(`VideoPlayer: Configurando para item: "${logTitle}", URL: "${streamUrlToPlay}", Tipo: ${logType}, ID: ${logId}`);
+    const currentItemTitleForLogs = item?.title || "N/A";
+    const currentStreamUrl = item?.streamUrl;
+    const currentItemType = item?.type || "Desconhecido";
+    const currentItemId = item?.id || "N/A";
+    
+    console.log(`VideoPlayer: Configurando para item: "${currentItemTitleForLogs}", URL: "${currentStreamUrl || 'Nenhuma'}", Tipo: ${currentItemType}, ID: ${currentItemId}`);
     
     setPlayerError(null);
 
-    if (!streamUrlToPlay || streamUrlToPlay.trim() === "" || streamUrlToPlay === TEST_STREAMS.NONE) {
-      console.log("VideoPlayer: streamUrlToPlay é nulo, vazio ou 'none'.");
+    if (!currentStreamUrl || currentStreamUrl.trim() === "") {
+      console.log("VideoPlayer: streamUrl é nulo ou vazio.");
       setIsLoading(false);
-      if (streamUrlToPlay === TEST_STREAMS.NONE && !propStreamUrl) {
-         setPlayerError("Nenhuma fonte de vídeo selecionada.");
-      }
+      setPlayerError(currentStreamUrl === null ? "Nenhuma fonte de vídeo selecionada." : "URL do vídeo inválida.");
       return;
     }
     setIsLoading(true); 
@@ -192,39 +194,40 @@ export function VideoPlayer({
     videoElement.removeAttribute('src');
     videoElement.load(); 
 
-    const lowerStreamUrl = streamUrlToPlay.toLowerCase();
+    const lowerStreamUrl = currentStreamUrl.toLowerCase();
     const isHlsFormat = lowerStreamUrl.includes('.m3u8') || 
                         lowerStreamUrl.includes('/manifest') || 
                         lowerStreamUrl.includes('.isml/manifest');
 
     let useHlsPlayer = false;
-    if (itemType === 'channel' && isHlsFormat) {
+    if (currentItemType === 'channel' && isHlsFormat) {
         useHlsPlayer = true;
-    } else if (itemType === 'channel' && !isHlsFormat) { 
+    } else if (currentItemType === 'channel' && !isHlsFormat) { 
         useHlsPlayer = false; 
-        console.log(`VideoPlayer: Item é CANAL, mas URL não é HLS. Usando player HTML5 padrão para: "${streamUrlToPlay}"`);
-    } else if (itemType === 'movie' || itemType === 'series') {
+        console.log(`VideoPlayer: Item é CANAL, mas URL não é HLS. Usando player HTML5 padrão para: "${currentStreamUrl}"`);
+    } else if (currentItemType === 'movie' || currentItemType === 'series_episode') {
         useHlsPlayer = false; 
-        console.log(`VideoPlayer: Item é FILME/SÉRIE. Usando player HTML5 padrão para: "${streamUrlToPlay}"`);
+        console.log(`VideoPlayer: Item é FILME/SÉRIE. Usando player HTML5 padrão para: "${currentStreamUrl}"`);
     } else {
-        useHlsPlayer = isHlsFormat;
-        console.warn(`VideoPlayer: itemType não especificado ou desconhecido ('${itemType}'). Tentando autodetectar formato. Usando HLS: ${useHlsPlayer} para: "${streamUrlToPlay}"`);
+        useHlsPlayer = isHlsFormat; // Fallback para autodetecção se o tipo for desconhecido
+        console.warn(`VideoPlayer: itemType não especificado ou desconhecido ('${currentItemType}'). Tentando autodetectar formato. Usando HLS: ${useHlsPlayer} para: "${currentStreamUrl}"`);
     }
 
 
     if (useHlsPlayer) {
-      console.log(`VideoPlayer: Configurando player HLS para stream: "${streamUrlToPlay}"`);
+      console.log(`VideoPlayer: Configurando player HLS para stream: "${currentStreamUrl}"`);
       if (Hls.isSupported()) {
         console.log("VideoPlayer: HLS.js é suportado.");
         const hls = new Hls({ debug: false }); 
         hlsRef.current = hls;
         
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          console.log("VideoPlayer HLS.js: Manifesto parseado para", streamUrlToPlay);
+          console.log("VideoPlayer HLS.js: Manifesto parseado para", currentStreamUrl);
+          tryPlay(videoElement, `HLS stream (manifest parsed event): ${currentStreamUrl}`);
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
-          console.error('HLS.js error event:', event, data, 'for URL:', streamUrlToPlay);
+          console.error('HLS.js error event:', event, data, 'for URL:', currentStreamUrl);
           let userFriendlyHlsError = "Erro ao carregar o stream de vídeo (HLS).";
           if (data.fatal) {
             switch (data.type) {
@@ -235,6 +238,9 @@ export function VideoPlayer({
                 } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
                      userFriendlyHlsError = "Erro ao carregar segmento do vídeo HLS. Conexão instável ou stream incompleto."
                 }
+                if (hlsRef.current && data.networkDetails?.status !== 403 && data.networkDetails?.status !== 404 ) { // Não tentar recuperar se for erro de acesso/não encontrado
+                  hlsRef.current.startLoad(); // Tentativa de recuperação de erro de rede do seu exemplo
+                }
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 userFriendlyHlsError = `Erro de mídia HLS: ${data.details}.`;
@@ -242,6 +248,9 @@ export function VideoPlayer({
                      userFriendlyHlsError = "Codecs de vídeo/áudio no stream HLS incompatíveis com seu navegador."
                 } else if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
                     userFriendlyHlsError = "Reprodução parada devido a problema no buffer do HLS."
+                }
+                 if (hlsRef.current) {
+                  hlsRef.current.recoverMediaError(); // Tentativa de recuperação de erro de mídia do seu exemplo
                 }
                 break;
               default:
@@ -255,28 +264,28 @@ export function VideoPlayer({
           setIsLoading(false);
         });
         
-        hls.loadSource(streamUrlToPlay);
+        hls.loadSource(currentStreamUrl);
         hls.attachMedia(videoElement);
-        cleanupVideoEvents = setupVideoEventListeners(videoElement, `HLS (${itemType || 'Desconhecido'})`); 
+        cleanupVideoEvents = setupVideoEventListeners(videoElement, 'HLS'); 
 
       } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-        console.log("VideoPlayer: HLS Nativo é suportado. Definindo src:", streamUrlToPlay);
-        videoElement.src = streamUrlToPlay;
-        cleanupVideoEvents = setupVideoEventListeners(videoElement, `HLS (Nativo) (${itemType || 'Desconhecido'})`);
+        console.log("VideoPlayer: HLS Nativo é suportado. Definindo src:", currentStreamUrl);
+        videoElement.src = currentStreamUrl;
+        cleanupVideoEvents = setupVideoEventListeners(videoElement, 'HLS'); // Contexto HLS pois é mpegurl
       } else {
         const unsupportedMessage = "Seu navegador não suporta HLS para este stream.";
-        console.warn("VideoPlayer: HLS.js não é suportado e HLS nativo não disponível:", streamUrlToPlay);
+        console.warn("VideoPlayer: HLS.js não é suportado e HLS nativo não disponível:", currentStreamUrl);
         setPlayerError(unsupportedMessage);
         setIsLoading(false);
       }
     } else { 
-      console.log(`VideoPlayer: Configurando player HTML5 padrão para: "${streamUrlToPlay}" (Item: "${currentItemTitleForLogs}", Tipo: ${itemType || 'Desconhecido'})`);
-      videoElement.src = streamUrlToPlay;
-      cleanupVideoEvents = setupVideoEventListeners(videoElement, `Default (${itemType || 'Desconhecido'})`);
+      console.log(`VideoPlayer: Configurando player HTML5 padrão para: "${currentStreamUrl}" (Item: "${currentItemTitleForLogs}", Tipo: ${currentItemType})`);
+      videoElement.src = currentStreamUrl;
+      cleanupVideoEvents = setupVideoEventListeners(videoElement, 'Default');
     }
 
     return () => {
-      console.log("VideoPlayer: Limpando para stream:", streamUrlToPlay, "(Item:", currentItemTitleForLogs, ")");
+      console.log("VideoPlayer: Limpando para stream:", currentStreamUrl, "(Item:", currentItemTitleForLogs, ")");
       if (cleanupVideoEvents) {
         cleanupVideoEvents();
       }
@@ -291,10 +300,10 @@ export function VideoPlayer({
         videoElement.load(); 
       }
     };
-  }, [streamUrlToPlay, itemId, itemType, itemTitle, propStreamUrl, setupVideoEventListeners, logMediaError, setIsLoading, setPlayerError, tryPlay, currentItemTitleForLogs]); // Added propStreamUrl and currentItemTitleForLogs to deps
+  }, [item, setupVideoEventListeners, logMediaError, tryPlay, setIsLoading, setPlayerError]);
 
 
-  if (!streamUrlToPlay && !playerError && !isLoading) {
+  if (!item || !item.streamUrl) { // Condição para quando não há item válido
     return (
       <div className="w-full aspect-video flex flex-col items-center justify-center bg-muted rounded-lg text-muted-foreground">
         <WifiOff className="h-16 w-16 mb-4" />
@@ -303,51 +312,34 @@ export function VideoPlayer({
       </div>
     );
   }
-
+  
   return (
-    <div className="w-full space-y-2">
-      <div className="p-2 bg-card border rounded-md shadow-sm">
-        <Label htmlFor="debug-stream-select" className="text-xs font-medium text-muted-foreground">Debug: Selecionar Stream de Teste</Label>
-        <Select value={currentTestStream} onValueChange={setCurrentTestStream}>
-          <SelectTrigger id="debug-stream-select" className="w-full h-9 text-xs mt-1">
-            <SelectValue placeholder="Selecionar stream" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={TEST_STREAMS.NONE} className="text-xs">Usar Stream da Playlist (Original)</SelectItem>
-            <SelectItem value={TEST_STREAMS.HLS_BIG_BUCK_BUNNY} className="text-xs">Teste HLS (Big Buck Bunny)</SelectItem>
-            <SelectItem value={TEST_STREAMS.MP4_BIG_BUCK_BUNNY} className="text-xs">Teste MP4 (Big Buck Bunny)</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground mt-1 truncate" title={streamUrlToPlay || "Nenhum stream selecionado"}>
-          URL atual: {streamUrlToPlay || "Nenhum"}
-        </p>
-      </div>
-
-      <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl relative">
-        {isLoading && !playerError && (
-           <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/60">
-             <p className="text-primary-foreground text-lg font-semibold">Carregando vídeo...</p>
-           </div>
-        )}
-        <video
-          ref={videoRef}
-          controls
-          className="w-full h-full"
-          playsInline 
-          poster={posterUrl}
-          preload="auto"
-          crossOrigin="anonymous" 
-        >
-          Seu navegador não suporta a tag de vídeo ou o formato do vídeo.
-        </video>
-        {playerError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-destructive/90 p-4 z-10 text-destructive-foreground">
-            <AlertTriangle className="h-10 w-10 md:h-12 md:w-12 mb-2 md:mb-3" />
-            <p className="text-md md:text-lg font-semibold mb-1">Erro ao Carregar Vídeo</p>
-            <p className="text-xs md:text-sm max-w-md">{playerError}</p>
-          </div>
-        )}
-      </div>
+    <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-2xl relative">
+      {isLoading && !playerError && (
+         <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/60">
+           <p className="text-primary-foreground text-lg font-semibold">Carregando vídeo...</p>
+         </div>
+      )}
+      <video
+        ref={videoRef}
+        controls
+        className="w-full h-full"
+        playsInline 
+        poster={item.posterUrl}
+        preload="auto" 
+        crossOrigin="anonymous" 
+      >
+        Seu navegador não suporta a tag de vídeo ou o formato do vídeo.
+      </video>
+      {playerError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-destructive/90 p-4 z-10 text-destructive-foreground">
+          <AlertTriangle className="h-10 w-10 md:h-12 md:w-12 mb-2 md:mb-3" />
+          <p className="text-md md:text-lg font-semibold mb-1">Erro ao Carregar Vídeo</p>
+          <p className="text-xs md:text-sm max-w-md">{playerError}</p>
+        </div>
+      )}
     </div>
   );
 }
+
+    

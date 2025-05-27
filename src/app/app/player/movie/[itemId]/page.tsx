@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { VideoPlayer } from '@/components/player/video-player';
 import { PageHeader } from '@/components/page-header';
@@ -11,27 +11,42 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Film } from 'lucide-react';
 import { getMovieItemById, getMovieItemsByTitleYearAcrossPlaylists, getAllPlaylistsMetadata, getPlaylistMetadata, type MovieItem } from '@/lib/db';
-import type { PlaylistMetadata } from '@/lib/constants';
+import type { PlaylistMetadata, MediaItemForPlayer } from '@/lib/constants';
 
 interface StreamOption {
-  id: string; // Unique identifier for the option, e.g., playlistId_streamUrl
-  label: string; // e.g., "Playlist Name"
+  id: string; 
+  label: string;
   streamUrl: string;
-  posterUrl?: string; // For specific poster from this source if different
+  posterUrl?: string;
   playlistName: string;
 }
 
 export default function MoviePlayerPage() {
   const params = useParams<{ itemId: string }>();
   const router = useRouter();
-  const movieNumericId = parseInt(params.itemId, 10);
+  const movieNumericId = useMemo(() => parseInt(params.itemId, 10), [params.itemId]);
 
   const [primaryMovieInfo, setPrimaryMovieInfo] = useState<MovieItem | null>(null);
   const [streamOptions, setStreamOptions] = useState<StreamOption[]>([]);
-  const [selectedStreamUrl, setSelectedStreamUrl] = useState<string | null>(null);
+  const [selectedStreamOptionId, setSelectedStreamOptionId] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Memoized MediaItemForPlayer
+  const mediaItemForPlayer: MediaItemForPlayer | null = useMemo(() => {
+    if (!selectedStreamOptionId || !primaryMovieInfo) return null;
+    const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
+    if (!selectedOpt) return null;
+    
+    return {
+      id: primaryMovieInfo.id!, // Use o ID do MovieItem principal
+      streamUrl: selectedOpt.streamUrl,
+      title: primaryMovieInfo.title,
+      type: 'movie',
+      posterUrl: selectedOpt.posterUrl || primaryMovieInfo.logoUrl,
+    };
+  }, [selectedStreamOptionId, streamOptions, primaryMovieInfo]);
 
   const fetchMovieData = useCallback(async () => {
     if (isNaN(movieNumericId)) {
@@ -42,7 +57,7 @@ export default function MoviePlayerPage() {
     setIsLoading(true);
     setError(null);
     setStreamOptions([]); 
-    setSelectedStreamUrl(null); 
+    setSelectedStreamOptionId(null); 
 
     try {
       const mainMovie = await getMovieItemById(movieNumericId);
@@ -77,7 +92,7 @@ export default function MoviePlayerPage() {
             playlistName: playlistName,
           };
         });
-      } else if (mainMovie) { // Fallback if allInstances is empty but mainMovie was found
+      } else if (mainMovie) { 
         const playlistMeta = playlistMetaMap.get(mainMovie.playlistDbId);
         finalOptions = [{
            id: mainMovie.playlistDbId + "_" + mainMovie.streamUrl,
@@ -93,7 +108,7 @@ export default function MoviePlayerPage() {
 
       if (finalOptions.length > 0) {
         const primaryOptionInFinal = finalOptions.find(opt => opt.streamUrl === mainMovie.streamUrl);
-        setSelectedStreamUrl(primaryOptionInFinal ? primaryOptionInFinal.streamUrl : finalOptions[0].streamUrl);
+        setSelectedStreamOptionId(primaryOptionInFinal ? primaryOptionInFinal.id : finalOptions[0].id);
       } else {
         setError(`Nenhuma fonte de stream disponível para "${mainMovie.title}".`);
       }
@@ -110,8 +125,8 @@ export default function MoviePlayerPage() {
     fetchMovieData();
   }, [fetchMovieData]);
 
-  const handleStreamSelectionChange = (newStreamUrl: string) => {
-    setSelectedStreamUrl(newStreamUrl);
+  const handleStreamSelectionChange = (newStreamOptionId: string) => {
+    setSelectedStreamOptionId(newStreamOptionId);
   };
   
   const descriptionParts = [];
@@ -190,14 +205,14 @@ export default function MoviePlayerPage() {
         </Button>
       </div>
       
-      <VideoPlayer streamUrl={selectedStreamUrl} />
+      <VideoPlayer item={mediaItemForPlayer} />
 
       {streamOptions.length > 1 && (
         <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
           <div>
             <Label htmlFor="source-select" className="mb-2 block font-medium text-foreground">Fonte do Filme</Label>
             <Select 
-              value={selectedStreamUrl || undefined} 
+              value={selectedStreamOptionId || undefined} 
               onValueChange={handleStreamSelectionChange}
             >
               <SelectTrigger id="source-select" className="w-full md:w-1/2">
@@ -205,7 +220,7 @@ export default function MoviePlayerPage() {
               </SelectTrigger>
               <SelectContent>
                 {streamOptions.map(opt => (
-                  <SelectItem key={opt.id} value={opt.streamUrl}>
+                  <SelectItem key={opt.id} value={opt.id}>
                     {opt.label}
                   </SelectItem>
                 ))}
@@ -214,13 +229,14 @@ export default function MoviePlayerPage() {
           </div>
         </div>
       )}
-       {streamOptions.length === 1 && primaryMovieInfo.streamUrl !== streamOptions[0].streamUrl && (
+       {streamOptions.length === 1 && mediaItemForPlayer && mediaItemForPlayer.streamUrl !== primaryMovieInfo.streamUrl && ( // Verifica se a fonte única é diferente da primária
          <p className="text-sm text-muted-foreground p-2">Fonte: {streamOptions[0].label}</p>
       )}
       <div className="text-xs text-muted-foreground p-2 break-all">
-        URL Atual: {selectedStreamUrl || "Nenhuma"}
+        URL Atual: {mediaItemForPlayer?.streamUrl || "Nenhuma"}
       </div>
     </div>
   );
 }
 
+    
