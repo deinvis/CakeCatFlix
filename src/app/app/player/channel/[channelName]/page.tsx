@@ -9,15 +9,17 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AlertTriangle, ArrowLeft, Tv } from 'lucide-react';
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import { getAllPlaylistsMetadata, getChannelItemsByBaseNameAcrossPlaylists, getPlaylistMetadata, type ChannelItem } from '@/lib/db';
 import type { PlaylistMetadata } from '@/lib/constants';
 
-interface ChannelSource {
-  playlistId: string;
+interface StreamOption {
+  id: string; // Unique identifier for the option, e.g., streamUrl or playlistId_quality
+  label: string; // e.g., "Playlist Name - HD"
+  streamUrl: string;
+  logoUrl?: string;
   playlistName: string;
-  qualities: { qualityLabel: string; streamUrl: string }[];
-  logoUrl?: string; // Representative logo for this source
+  quality: string;
 }
 
 export default function ChannelPlayerPage() {
@@ -25,10 +27,9 @@ export default function ChannelPlayerPage() {
   const router = useRouter();
   const channelNameDecoded = params.channelName ? decodeURIComponent(params.channelName) : "Canal Desconhecido";
 
-  const [channelSources, setChannelSources] = useState<ChannelSource[]>([]);
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-  const [selectedQuality, setSelectedQuality] = useState<string | null>(null);
-  const [currentStreamUrl, setCurrentStreamUrl] = useState<string | null>(null);
+  const [streamOptions, setStreamOptions] = useState<StreamOption[]>([]);
+  const [selectedStreamUrl, setSelectedStreamUrl] = useState<string | null>(null);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [channelTitle, setChannelTitle] = useState<string>(channelNameDecoded);
@@ -59,52 +60,46 @@ export default function ChannelPlayerPage() {
       }
 
       setChannelTitle(rawChannelItems[0].baseChannelName || channelNameDecoded);
-      // Use the first available logo as representative
       const firstLogo = rawChannelItems.find(item => item.logoUrl)?.logoUrl;
       setChannelLogo(firstLogo);
 
-      const sourcesMap = new Map<string, { playlistName: string; items: ChannelItem[] }>();
+      const options: StreamOption[] = [];
+      const playlistMetaMap = new Map(playlists.map(p => [p.id, p]));
+
       for (const item of rawChannelItems) {
-        if (!sourcesMap.has(item.playlistDbId)) {
-          const playlistMeta = await getPlaylistMetadata(item.playlistDbId);
-          sourcesMap.set(item.playlistDbId, { 
-            playlistName: playlistMeta?.name || `Fonte ${item.playlistDbId.slice(-4)}`,
-            items: [] 
-          });
-        }
-        sourcesMap.get(item.playlistDbId)!.items.push(item);
+        const playlistMeta = playlistMetaMap.get(item.playlistDbId);
+        const playlistName = playlistMeta?.name || `Fonte ${item.playlistDbId.slice(-4)}`;
+        const quality = item.quality || 'Padrão';
+        options.push({
+          id: `${item.playlistDbId}_${item.streamUrl}_${quality}`, // More unique ID
+          label: `${playlistName} - ${quality}`,
+          streamUrl: item.streamUrl,
+          logoUrl: item.logoUrl,
+          playlistName: playlistName,
+          quality: quality,
+        });
       }
       
-      const groupedSources: ChannelSource[] = Array.from(sourcesMap.entries()).map(([playlistId, data]) => {
-        const qualities = data.items
-          .map(item => ({
-            qualityLabel: item.quality || 'Padrão',
-            streamUrl: item.streamUrl,
-          }))
-          .sort((a, b) => { // Simple sort: FHD > HD > SD > Padrão
-            const order = ['FHD', 'HD', 'SD', 'Padrão'];
-            return order.indexOf(a.qualityLabel) - order.indexOf(b.qualityLabel);
-          });
-        
-        return {
-          playlistId,
-          playlistName: data.playlistName,
-          qualities,
-          logoUrl: data.items.find(i => i.logoUrl)?.logoUrl // Logo for this specific source
-        };
+      // Sort options: by playlist name, then by quality (e.g., FHD, HD, SD, Padrão)
+      const qualityOrder = ['FHD', 'HD', 'SD', 'Padrão'];
+      options.sort((a, b) => {
+        if (a.playlistName.toLowerCase() !== b.playlistName.toLowerCase()) {
+          return a.playlistName.toLowerCase().localeCompare(b.playlistName.toLowerCase());
+        }
+        return qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality);
       });
+      
+      setStreamOptions(options);
 
-      setChannelSources(groupedSources);
-
-      if (groupedSources.length > 0) {
-        const firstSource = groupedSources[0];
-        setSelectedSourceId(firstSource.playlistId);
-        if (firstSource.qualities.length > 0) {
-          const defaultQuality = firstSource.qualities.find(q => q.qualityLabel === 'HD') || 
-                                 firstSource.qualities.find(q => q.qualityLabel === 'Padrão') ||
-                                 firstSource.qualities[0];
-          setSelectedQuality(defaultQuality.qualityLabel);
-          setCurrentStreamUrl(defaultQuality.streamUrl);
+      if (options.length > 0) {
+        // Attempt to set a default stream: prioritize HD, then Padrão, then first available
+        const defaultHdOption = options.find(opt => opt.quality === 'HD');
+        const defaultStandardOption = options.find(opt => opt.quality === 'Padrão');
+        const defaultOption = defaultHdOption || defaultStandardOption || options[0];
+        
+        setSelectedStreamUrl(defaultOption.streamUrl);
+        if (defaultOption.logoUrl) { // Update logo based on default selected stream
+          setChannelLogo(defaultOption.logoUrl);
         }
       }
 
@@ -120,21 +115,14 @@ export default function ChannelPlayerPage() {
     fetchChannelData();
   }, [fetchChannelData]);
 
-  useEffect(() => {
-    if (selectedSourceId && selectedQuality) {
-      const source = channelSources.find(s => s.playlistId === selectedSourceId);
-      if (source) {
-        const qualityObj = source.qualities.find(q => q.qualityLabel === selectedQuality);
-        if (qualityObj) {
-          setCurrentStreamUrl(qualityObj.streamUrl);
-          // Update channel logo if the selected source has a specific one
-          if(source.logoUrl) setChannelLogo(source.logoUrl);
-        }
-      }
+  const handleStreamSelectionChange = (selectedUrl: string) => {
+    setSelectedStreamUrl(selectedUrl);
+    const selectedOpt = streamOptions.find(opt => opt.streamUrl === selectedUrl);
+    if (selectedOpt?.logoUrl) {
+      setChannelLogo(selectedOpt.logoUrl);
     }
-  }, [selectedSourceId, selectedQuality, channelSources]);
+  };
 
-  const currentSelectedSource = channelSources.find(s => s.playlistId === selectedSourceId);
 
   if (isLoading) {
     return (
@@ -143,7 +131,6 @@ export default function ChannelPlayerPage() {
         <Skeleton className="h-8 w-1/4 mb-6" />
         <Skeleton className="w-full aspect-video rounded-lg" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
       </div>
@@ -165,17 +152,16 @@ export default function ChannelPlayerPage() {
     );
   }
   
-  if (channelSources.length === 0 && !isLoading) {
+  if (streamOptions.length === 0 && !isLoading) {
      return (
       <div className="container mx-auto p-4 md:p-6 text-center">
-        <PageHeader title={channelTitle} description="Nenhuma fonte encontrada" />
+        <PageHeader title={channelTitle} description="Nenhuma fonte ou qualidade encontrada" />
          <Button onClick={() => router.back()}>
             <ArrowLeft className="mr-2 h-4 w-4" /> Voltar aos canais
           </Button>
       </div>
     )
   }
-
 
   return (
     <div className="container mx-auto p-0 md:p-2 lg:p-4 space-y-4 md:space-y-6">
@@ -189,53 +175,23 @@ export default function ChannelPlayerPage() {
             </Button>
         </div>
       
-      <VideoPlayer streamUrl={currentStreamUrl} />
+      <VideoPlayer streamUrl={selectedStreamUrl} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-card rounded-lg shadow">
+      <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
         <div>
-          <Label htmlFor="source-select" className="mb-2 block font-medium text-foreground">Fonte (Playlist)</Label>
+          <Label htmlFor="stream-select" className="mb-2 block font-medium text-foreground">Fonte / Qualidade</Label>
           <Select 
-            value={selectedSourceId || undefined} 
-            onValueChange={(value) => {
-              setSelectedSourceId(value);
-              // Reset quality when source changes, then useEffect will pick best default
-              const newSource = channelSources.find(s => s.playlistId === value);
-              if (newSource && newSource.qualities.length > 0) {
-                const defaultQuality = newSource.qualities.find(q => q.qualityLabel === 'HD') || 
-                                       newSource.qualities.find(q => q.qualityLabel === 'Padrão') ||
-                                       newSource.qualities[0];
-                setSelectedQuality(defaultQuality.qualityLabel); 
-              } else {
-                setSelectedQuality(null);
-              }
-            }}
+            value={selectedStreamUrl || undefined} 
+            onValueChange={handleStreamSelectionChange}
+            disabled={streamOptions.length === 0}
           >
-            <SelectTrigger id="source-select" className="w-full">
-              <SelectValue placeholder="Selecione uma fonte" />
+            <SelectTrigger id="stream-select" className="w-full">
+              <SelectValue placeholder={streamOptions.length > 0 ? "Selecione uma fonte e qualidade" : "Nenhuma opção disponível"} />
             </SelectTrigger>
             <SelectContent>
-              {channelSources.map(source => (
-                <SelectItem key={source.playlistId} value={source.playlistId}>
-                  {source.playlistName} ({source.qualities.length} {source.qualities.length === 1 ? 'qualidade' : 'qualidades'})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="quality-select" className="mb-2 block font-medium text-foreground">Qualidade</Label>
-          <Select 
-            value={selectedQuality || undefined} 
-            onValueChange={setSelectedQuality}
-            disabled={!selectedSourceId || !currentSelectedSource || currentSelectedSource.qualities.length === 0}
-          >
-            <SelectTrigger id="quality-select" className="w-full">
-              <SelectValue placeholder={currentSelectedSource && currentSelectedSource.qualities.length > 0 ? "Selecione uma qualidade" : "Nenhuma qualidade disponível"} />
-            </SelectTrigger>
-            <SelectContent>
-              {currentSelectedSource?.qualities.map(q => (
-                <SelectItem key={q.qualityLabel} value={q.qualityLabel}>
-                  {q.qualityLabel}
+              {streamOptions.map(opt => (
+                <SelectItem key={opt.id} value={opt.streamUrl}>
+                  {opt.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -243,7 +199,7 @@ export default function ChannelPlayerPage() {
         </div>
       </div>
       <div className="text-xs text-muted-foreground p-2 break-all">
-        URL Atual: {currentStreamUrl || "Nenhuma"}
+        URL Atual: {selectedStreamUrl || "Nenhuma"}
       </div>
     </div>
   );
