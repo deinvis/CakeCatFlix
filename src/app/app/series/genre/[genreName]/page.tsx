@@ -7,7 +7,7 @@ import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
 import { MOCK_SERIES_GENRES, type ContentItemForCard, type PlaylistItemCore } from '@/lib/constants';
 import { getAllPlaylistsMetadata, getPlaylistItemsByGroup } from '@/lib/db';
-import { notFound, useParams } from 'next/navigation'; // Use useParams for client component
+import { useParams } from 'next/navigation'; // Use useParams for client component
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -36,13 +36,13 @@ export default function SeriesGenrePage() {
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [genreExists, setGenreExists] = useState<boolean | null>(null);
+  const [genreExistsInMock, setGenreExistsInMock] = useState<boolean | null>(null); // Renamed for clarity
 
   useEffect(() => {
     const foundGenre = MOCK_SERIES_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
-    setGenreExists(!!foundGenre);
+    setGenreExistsInMock(!!foundGenre);
     if (!foundGenre) {
-        console.warn(`Genre "${genreNameDecoded}" not found in MOCK_SERIES_GENRES.`);
+        console.warn(`Genre "${genreNameDecoded}" not found in MOCK_SERIES_GENRES. Content might still exist in DB.`);
     }
   }, [genreNameDecoded]);
 
@@ -89,26 +89,24 @@ export default function SeriesGenrePage() {
         setIsLoading(false);
       }
     }
-     if (genreExists === true) {
-        initialize();
-    } else if (genreExists === false) {
-        setIsLoading(false);
-        setHasPlaylistsConfigured(false);
-    }
-  }, [genreNameDecoded, fetchSeriesByGenre, genreExists]);
+    initialize();
+  }, [genreNameDecoded, fetchSeriesByGenre]);
 
   const loadMoreItems = () => {
-    if (activePlaylistId && hasMore && !isLoading && genreExists) {
+    if (activePlaylistId && hasMore && !isLoading) {
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       fetchSeriesByGenre(activePlaylistId, genreNameDecoded, nextPage);
     }
   };
   
-  if (genreExists === false && !isLoading) {
+  // This "genre not found" UI is based on MOCK_SERIES_GENRES.
+  // If content for a genre exists in DB but not in MOCK_SERIES_GENRES,
+  // it will still be displayed by ContentGrid. This block might show if MOCK_SERIES_GENRES is strict.
+  if (genreExistsInMock === false && !isLoading && seriesItems.length === 0 && !hasPlaylistsConfigured) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
-        <PageHeader title="Genre Not Found" description={`The series genre "${genreNameDecoded}" does not exist.`} />
+        <PageHeader title="Genre Not Found" description={`The series genre "${genreNameDecoded}" does not seem to exist or no content is available.`} />
         <Button variant="outline" asChild className="mt-4">
           <Link href="/app/series">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -144,10 +142,4 @@ export default function SeriesGenrePage() {
       )}
     </div>
   );
-}
-
-export async function generateStaticParams() {
-  return MOCK_SERIES_GENRES.map((genre) => ({
-    genreName: encodeURIComponent(genre.toLowerCase()),
-  }));
 }

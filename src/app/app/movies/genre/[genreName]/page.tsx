@@ -7,7 +7,7 @@ import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
 import { MOCK_MOVIE_GENRES, type ContentItemForCard, type PlaylistItemCore } from '@/lib/constants';
 import { getAllPlaylistsMetadata, getPlaylistItemsByGroup } from '@/lib/db';
-import { notFound, useParams } from 'next/navigation'; // Use useParams for client component
+import { useParams } from 'next/navigation'; // Use useParams for client component
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -40,13 +40,14 @@ export default function MovieGenrePage() {
 
   // Validate genre (client-side, consider implications if generateStaticParams is used)
   useEffect(() => {
+    // MOCK_MOVIE_GENRES is used for an initial check.
+    // If a genre is valid in the DB but not in MOCK_MOVIE_GENRES, it would still be fetched.
+    // The "genre not found" UI below relies on this MOCK check.
+    // A more robust check might involve querying the DB for available genres if MOCK_MOVIE_GENRES is not exhaustive.
     const foundGenre = MOCK_MOVIE_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
     setGenreExists(!!foundGenre);
     if (!foundGenre) {
-        // notFound() can only be used in Server Components.
-        // For client components, you might redirect or show a "not found" UI.
-        // For now, we will rely on the ContentGrid showing "no content" if items are empty.
-        console.warn(`Genre "${genreNameDecoded}" not found in MOCK_MOVIE_GENRES.`);
+        console.warn(`Genre "${genreNameDecoded}" not found in MOCK_MOVIE_GENRES. Content might still exist in DB if group titles differ.`);
     }
   }, [genreNameDecoded]);
 
@@ -56,6 +57,7 @@ export default function MovieGenrePage() {
     setIsLoading(true);
     try {
       const offset = (page - 1) * ITEMS_PER_PAGE;
+      // Use the decoded genre name for fetching from DB, as it should match groupTitle
       const itemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, ITEMS_PER_PAGE, offset);
       
       const newCardItems = itemsFromDB.map(transformPlaylistItemToCardItem);
@@ -81,10 +83,7 @@ export default function MovieGenrePage() {
           setActivePlaylistId(firstPlaylistId);
           setMovieItems([]);
           setCurrentPage(1);
-          // The genre for getPlaylistItemsByGroup should be the actual groupTitle from M3U
-          // MOCK_MOVIE_GENRES might not perfectly match group-title values.
-          // For now, we assume genreNameDecoded is a valid groupTitle or a close match.
-          // A more robust solution would be to fetch all unique groupTitles from DB.
+          // Fetch movies using the decoded genre name
           await fetchMoviesByGenre(firstPlaylistId, genreNameDecoded, 1);
         } else {
           setHasPlaylistsConfigured(false);
@@ -97,28 +96,27 @@ export default function MovieGenrePage() {
         setIsLoading(false);
       }
     }
-    if (genreExists === true) { // Only initialize if genre is valid based on MOCK_MOVIE_GENRES
-        initialize();
-    } else if (genreExists === false) {
-        setIsLoading(false); // Stop loading if genre is invalid
-        setHasPlaylistsConfigured(false); // Assume no content can be shown
-    }
-  }, [genreNameDecoded, fetchMoviesByGenre, genreExists]);
+    // Initialize regardless of MOCK_MOVIE_GENRES check, rely on DB fetch
+    // The genreExists state is now more for UI display of "not found" if MOCK_MOVIE_GENRES is considered authoritative
+    initialize();
+    
+  }, [genreNameDecoded, fetchMoviesByGenre]); // Removed genreExists from dependency array to always try fetching
 
   const loadMoreItems = () => {
-    if (activePlaylistId && hasMore && !isLoading && genreExists) {
+    if (activePlaylistId && hasMore && !isLoading) {
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       fetchMoviesByGenre(activePlaylistId, genreNameDecoded, nextPage);
     }
   };
 
-  if (genreExists === false && !isLoading) {
-    // Handle not found on client side if preferred over just showing empty content grid
-    // This check runs after initial useEffect for genreExists determination
+  // This "genre not found" UI is based on MOCK_MOVIE_GENRES.
+  // If content for a genre exists in DB but not in MOCK_MOVIE_GENRES,
+  // it will still be displayed by ContentGrid. This block might show if MOCK_MOVIE_GENRES is strict.
+  if (genreExists === false && !isLoading && movieItems.length === 0 && !hasPlaylistsConfigured) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
-        <PageHeader title="Genre Not Found" description={`The movie genre "${genreNameDecoded}" does not exist.`} />
+        <PageHeader title="Genre Not Found" description={`The movie genre "${genreNameDecoded}" does not seem to exist or no content is available.`} />
         <Button variant="outline" asChild className="mt-4">
           <Link href="/app/movies">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -155,14 +153,4 @@ export default function MovieGenrePage() {
       )}
     </div>
   );
-}
-
-// generateStaticParams might need to be re-evaluated if MOCK_MOVIE_GENRES
-// is replaced by dynamic genres from the database.
-// For now, it uses MOCK_MOVIE_GENRES. If a genre from DB is accessed directly
-// via URL and not in this list, it would be a dynamic route render (SSR/ISR).
-export async function generateStaticParams() {
-  return MOCK_MOVIE_GENRES.map((genre) => ({
-    genreName: encodeURIComponent(genre.toLowerCase()),
-  }));
 }
