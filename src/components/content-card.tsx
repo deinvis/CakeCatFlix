@@ -27,20 +27,21 @@ export function ContentCard({
   const [imageError, setImageError] = useState(false);
 
   const defaultPlaceholder = `https://placehold.co/300x450.png`;
-  // Use a placeholder if imageUrl is initially missing or if an error occurs
-  const imageSrc = imageError ? defaultPlaceholder : (imageUrl || defaultPlaceholder);
+  // Determine the image source: original imageUrl, or placeholder if imageUrl is missing or an error occurred.
+  const imageSrc = imageError || !imageUrl ? defaultPlaceholder : imageUrl;
   const finalDataAiHint = dataAiHint || `${type} ${title}`.substring(0, 50).toLowerCase();
 
   const handleClick = () => {
-    if (type === 'movie') {
+    if (type === 'movie' && id) {
       router.push(`/app/player/movie/${id.toString()}`);
-    } else if (type === 'series') {
+    } else if (type === 'series' && (seriesId || id)) {
       const navigationId = seriesId || id;
       router.push(`/app/player/series/${navigationId.toString()}`);
-    } else if (type === 'channel') {
+    } else if (type === 'channel' && id) {
+      // For channels, 'id' is the baseChannelName
       router.push(`/app/player/channel/${encodeURIComponent(id)}`);
     } else {
-      console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined.`);
+      console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined or ID missing.`);
     }
   };
 
@@ -59,6 +60,7 @@ export function ContentCard({
         <CardContent className="p-0 flex-grow flex flex-col">
           <div className="aspect-[2/3] relative w-full bg-muted overflow-hidden">
             <Image
+              key={imageSrc} // Add key here to force re-render when imageSrc changes to placeholder
               src={imageSrc}
               alt={title}
               fill
@@ -66,11 +68,11 @@ export function ContentCard({
               className="object-cover transition-transform duration-300 ease-in-out group-hover:scale-110 group-focus:scale-110"
               data-ai-hint={finalDataAiHint}
               onError={() => {
-                if (!imageError) { // Prevent infinite loop if placeholder also fails (though unlikely for placehold.co)
+                if (!imageError) { // Prevent infinite loop if placeholder also fails
                   setImageError(true);
                 }
               }}
-              unoptimized={imageError} // If using placeholder, no need to optimize it further
+              unoptimized={imageError || !imageUrl} // If using placeholder, no need to optimize it
             />
             <Badge variant="default" className="absolute top-2 left-2 text-xs shadow-md">
               <TypeIcon className="h-3 w-3 mr-1" />
