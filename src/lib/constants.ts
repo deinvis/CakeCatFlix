@@ -1,6 +1,6 @@
 
 import type { LucideIcon } from 'lucide-react';
-import { Tv2, Film, Clapperboard, Settings as SettingsIcon, History, Heart } from 'lucide-react';
+import { Tv2, Film, Clapperboard, Settings as SettingsIcon, Heart } from 'lucide-react'; // Removed History
 
 export const APP_NAME = "CatCakeFlix";
 
@@ -14,7 +14,6 @@ export const NAV_LINKS: NavLink[] = [
   { href: "/app/channels", label: "Canais", icon: Tv2 },
   { href: "/app/movies", label: "Filmes", icon: Film },
   { href: "/app/series", label: "Séries", icon: Clapperboard },
-  { href: "/app/recentes", label: "Recentes", icon: History },
   { href: "/app/favoritos", label: "Favoritos", icon: Heart },
 ];
 
@@ -24,7 +23,6 @@ export const STARTUP_PAGES = [
   { value: "channels", label: "Canais" },
   { value: "movies", label: "Filmes" },
   { value: "series", label: "Séries" },
-  { value: "recentes", label: "Recentes" },
   { value: "favoritos", label: "Favoritos" },
 ];
 
@@ -132,10 +130,10 @@ export interface ContentItemForCard {
 
 // Interface for what the VideoPlayer component expects
 export interface MediaItemForPlayer {
-  id: string | number; // Unique ID of the content being played (movie id, series id + episode key, channel name + stream url)
+  id: string | number;
   streamUrl: string | null;
-  itemTitle?: string; // Display title for the player
-  itemType?: 'channel' | 'movie' | 'series_episode'; // Type of content, 'series_episode' for series playback
+  title?: string;
+  type?: 'channel' | 'movie' | 'series_episode';
   posterUrl?: string;
 }
 
