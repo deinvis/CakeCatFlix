@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertTriangle, ArrowLeft, Film } from 'lucide-react';
 import { getMovieItemById, getMovieItemsByTitleYearAcrossPlaylists, getAllPlaylistsMetadata, getPlaylistMetadata, type MovieItem } from '@/lib/db';
-import type { PlaylistMetadata, MediaItemForPlayer } from '@/lib/constants';
+// import type { MediaItemForPlayer } from '@/lib/constants'; // No longer used directly by VideoPlayer prop
 
 interface StreamOption {
   id: string; 
@@ -33,20 +33,11 @@ export default function MoviePlayerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Memoized MediaItemForPlayer
-  const mediaItemForPlayer: MediaItemForPlayer | null = useMemo(() => {
-    if (!selectedStreamOptionId || !primaryMovieInfo) return null;
+  const selectedStreamUrl = useMemo(() => {
+    if (!selectedStreamOptionId) return null;
     const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
-    if (!selectedOpt) return null;
-    
-    return {
-      id: primaryMovieInfo.id!, // Use o ID do MovieItem principal
-      streamUrl: selectedOpt.streamUrl,
-      title: primaryMovieInfo.title,
-      type: 'movie',
-      posterUrl: selectedOpt.posterUrl || primaryMovieInfo.logoUrl,
-    };
-  }, [selectedStreamOptionId, streamOptions, primaryMovieInfo]);
+    return selectedOpt?.streamUrl || null;
+  }, [selectedStreamOptionId, streamOptions]);
 
   const fetchMovieData = useCallback(async () => {
     if (isNaN(movieNumericId)) {
@@ -92,7 +83,7 @@ export default function MoviePlayerPage() {
             playlistName: playlistName,
           };
         });
-      } else if (mainMovie) { 
+      } else if (mainMovie?.streamUrl) { // Ensure mainMovie and its streamUrl exist
         const playlistMeta = playlistMetaMap.get(mainMovie.playlistDbId);
         finalOptions = [{
            id: mainMovie.playlistDbId + "_" + mainMovie.streamUrl,
@@ -205,7 +196,7 @@ export default function MoviePlayerPage() {
         </Button>
       </div>
       
-      <VideoPlayer item={mediaItemForPlayer} />
+      <VideoPlayer src={selectedStreamUrl} />
 
       {streamOptions.length > 1 && (
         <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
@@ -229,14 +220,12 @@ export default function MoviePlayerPage() {
           </div>
         </div>
       )}
-       {streamOptions.length === 1 && mediaItemForPlayer && mediaItemForPlayer.streamUrl !== primaryMovieInfo.streamUrl && ( // Verifica se a fonte única é diferente da primária
+       {streamOptions.length === 1 && primaryMovieInfo && selectedStreamUrl !== primaryMovieInfo.streamUrl && ( 
          <p className="text-sm text-muted-foreground p-2">Fonte: {streamOptions[0].label}</p>
       )}
       <div className="text-xs text-muted-foreground p-2 break-all">
-        URL Atual: {mediaItemForPlayer?.streamUrl || "Nenhuma"}
+        URL Atual: {selectedStreamUrl || "Nenhuma"}
       </div>
     </div>
   );
 }
-
-    

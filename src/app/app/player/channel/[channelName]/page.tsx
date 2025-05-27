@@ -9,13 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { AlertTriangle, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Tv2 } from 'lucide-react';
 import { getAllPlaylistsMetadata, getChannelItemsByBaseNameAcrossPlaylists, getPlaylistMetadata, type ChannelItem } from '@/lib/db';
-import type { PlaylistMetadata, MediaItemForPlayer } from '@/lib/constants';
+// import type { MediaItemForPlayer } from '@/lib/constants'; // No longer used directly by VideoPlayer prop
 
 interface StreamOption {
-  id: string; // Unique identifier for the option, e.g., streamUrl or playlistId_quality
-  label: string; // e.g., "Playlist Name - HD"
+  id: string; 
+  label: string; 
   streamUrl: string;
   logoUrl?: string;
   playlistName: string;
@@ -33,23 +33,12 @@ export default function ChannelPlayerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [channelTitle, setChannelTitle] = useState<string>(channelNameDecoded);
-  const [channelLogo, setChannelLogo] = useState<string | undefined>(undefined);
+  const [channelLogo, setChannelLogo] = useState<string | undefined>(undefined); // For the header logo
 
-  // Memoized MediaItemForPlayer
-  const mediaItemForPlayer: MediaItemForPlayer | null = useMemo(() => {
+  const selectedStreamUrl = useMemo(() => {
     if (!selectedStreamOptionId) return null;
-    const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
-    if (!selectedOpt) return null;
-
-    return {
-      id: channelNameDecoded + "_" + selectedOpt.streamUrl, // Composite ID for player
-      streamUrl: selectedOpt.streamUrl,
-      title: `${channelTitle} (${selectedOpt.playlistName} - ${selectedOpt.quality})`,
-      type: 'channel',
-      posterUrl: selectedOpt.logoUrl || channelLogo,
-    };
-  }, [selectedStreamOptionId, streamOptions, channelTitle, channelLogo, channelNameDecoded]);
-
+    return streamOptions.find(opt => opt.id === selectedStreamOptionId)?.streamUrl || null;
+  }, [selectedStreamOptionId, streamOptions]);
 
   const fetchChannelData = useCallback(async () => {
     if (!channelNameDecoded || channelNameDecoded === "Canal Desconhecido") {
@@ -71,13 +60,14 @@ export default function ChannelPlayerPage() {
 
       if (rawChannelItems.length === 0) {
         setError(`Nenhuma fonte encontrada para o canal "${channelNameDecoded}".`);
+        setStreamOptions([]);
         setIsLoading(false);
         return;
       }
 
       setChannelTitle(rawChannelItems[0].baseChannelName || channelNameDecoded);
-      const firstLogo = rawChannelItems.find(item => item.logoUrl)?.logoUrl;
-      setChannelLogo(firstLogo);
+      const firstLogoOverall = rawChannelItems.find(item => item.logoUrl)?.logoUrl;
+      setChannelLogo(firstLogoOverall);
 
       const options: StreamOption[] = [];
       const playlistMetaMap = new Map(playlists.map(p => [p.id, p]));
@@ -90,7 +80,7 @@ export default function ChannelPlayerPage() {
           id: `${item.playlistDbId}_${item.streamUrl}_${quality}`, 
           label: `${playlistName} - ${quality}`,
           streamUrl: item.streamUrl,
-          logoUrl: item.logoUrl,
+          logoUrl: item.logoUrl, // Keep specific logo per option
           playlistName: playlistName,
           quality: quality,
         });
@@ -112,9 +102,12 @@ export default function ChannelPlayerPage() {
         const defaultOption = defaultHdOption || defaultStandardOption || options[0];
         
         setSelectedStreamOptionId(defaultOption.id);
-        if (defaultOption.logoUrl && !channelLogo) { 
+        // Update header logo based on default selection if it has a logo
+        if (defaultOption.logoUrl && !firstLogoOverall) { 
           setChannelLogo(defaultOption.logoUrl);
         }
+      } else {
+         setError(`Nenhuma opção de stream encontrada para "${channelNameDecoded}".`);
       }
 
     } catch (err: any) {
@@ -123,7 +116,7 @@ export default function ChannelPlayerPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [channelNameDecoded, channelLogo]); // Adicionado channelLogo para evitar re-fetch desnecessário por causa dele
+  }, [channelNameDecoded]);
 
   useEffect(() => {
     fetchChannelData();
@@ -132,25 +125,39 @@ export default function ChannelPlayerPage() {
   const handleStreamSelectionChange = (selectedId: string) => {
     setSelectedStreamOptionId(selectedId);
     const selectedOpt = streamOptions.find(opt => opt.id === selectedId);
+    // Update the main channel logo in the header if the selected stream option has a specific logo
     if (selectedOpt?.logoUrl) {
       setChannelLogo(selectedOpt.logoUrl);
-    } else if (streamOptions.length > 0 && !selectedOpt?.logoUrl) {
-        // Se a opção selecionada não tem logo, mas há um logo global para o canal, mantenha-o.
-        // Se não, tente o logo da primeira opção como fallback.
-        const firstLogoOverall = streamOptions.find(item => item.logoUrl)?.logoUrl;
-        setChannelLogo(channelLogo || firstLogoOverall);
+    } else {
+      // Fallback to the first logo found overall for the channel if the selected option has no logo
+      const firstLogoOverall = streamOptions.find(opt => opt.logoUrl)?.logoUrl;
+      setChannelLogo(firstLogoOverall);
     }
   };
+
+  const currentDisplayTitle = useMemo(() => {
+     if (!selectedStreamOptionId) return channelTitle;
+     const selectedOpt = streamOptions.find(opt => opt.id === selectedStreamOptionId);
+     return selectedOpt ? `${channelTitle} (${selectedOpt.label})` : channelTitle;
+  }, [selectedStreamOptionId, streamOptions, channelTitle]);
 
 
   if (isLoading) {
     return (
       <div className="container mx-auto p-4 md:p-6 space-y-6">
-        <Skeleton className="h-10 w-1/3 mb-2" />
-        <Skeleton className="h-8 w-1/4 mb-6" />
+        <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <Skeleton className="h-10 w-10 md:h-12 md:w-12 rounded-sm" />
+                <div className="space-y-1">
+                    <Skeleton className="h-7 w-48" />
+                    <Skeleton className="h-5 w-64" />
+                </div>
+            </div>
+            <Skeleton className="h-10 w-24 rounded-md" />
+        </div>
         <Skeleton className="w-full aspect-video rounded-lg" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full rounded-md" />
         </div>
       </div>
     );
@@ -174,8 +181,8 @@ export default function ChannelPlayerPage() {
   if (streamOptions.length === 0 && !isLoading) {
      return (
       <div className="container mx-auto p-4 md:p-6 text-center">
-        <PageHeader title={channelTitle} description="Nenhuma fonte ou qualidade encontrada" />
-         <Button onClick={() => router.back()}>
+        <PageHeader title={channelTitle} description="Nenhuma fonte ou qualidade encontrada para este canal." />
+         <Button onClick={() => router.back()} variant="outline" className="mt-4">
             <ArrowLeft className="mr-2 h-4 w-4" /> Voltar aos canais
           </Button>
       </div>
@@ -185,43 +192,48 @@ export default function ChannelPlayerPage() {
   return (
     <div className="container mx-auto p-0 md:p-2 lg:p-4 space-y-4 md:space-y-6">
         <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-                 {channelLogo && <img src={channelLogo} alt={channelTitle} className="h-10 w-10 md:h-12 md:w-12 object-contain rounded-sm bg-muted p-0.5" onError={(e) => e.currentTarget.style.display = 'none'} />}
-                <PageHeader title={channelTitle} description="Selecione a fonte e qualidade abaixo" />
+            <div className="flex items-center gap-3 min-w-0">
+                 {channelLogo ? (
+                    <img src={channelLogo} alt={channelTitle} className="h-10 w-10 md:h-12 md:w-12 object-contain rounded-sm bg-muted p-0.5" onError={(e) => e.currentTarget.style.display = 'none'} />
+                 ) : (
+                    <div className="h-10 w-10 md:h-12 md:w-12 flex items-center justify-center bg-muted rounded-sm text-muted-foreground">
+                        <Tv2 className="h-6 w-6"/>
+                    </div>
+                 )}
+                <PageHeader title={channelTitle} description={streamOptions.length > 0 ? "Selecione a fonte e qualidade abaixo" : "Nenhuma fonte disponível"} />
             </div>
             <Button variant="outline" onClick={() => router.back()} className="flex-shrink-0">
                 <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
             </Button>
         </div>
       
-      <VideoPlayer item={mediaItemForPlayer} />
+      <VideoPlayer src={selectedStreamUrl} />
 
-      <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
-        <div>
-          <Label htmlFor="stream-select" className="mb-2 block font-medium text-foreground">Fonte / Qualidade</Label>
-          <Select 
-            value={selectedStreamOptionId || undefined} 
-            onValueChange={handleStreamSelectionChange}
-            disabled={streamOptions.length === 0}
-          >
-            <SelectTrigger id="stream-select" className="w-full">
-              <SelectValue placeholder={streamOptions.length > 0 ? "Selecione uma fonte e qualidade" : "Nenhuma opção disponível"} />
-            </SelectTrigger>
-            <SelectContent>
-              {streamOptions.map(opt => (
-                <SelectItem key={opt.id} value={opt.id}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {streamOptions.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">
+            <div>
+            <Label htmlFor="stream-select" className="mb-2 block font-medium text-foreground">Fonte / Qualidade</Label>
+            <Select 
+                value={selectedStreamOptionId || undefined} 
+                onValueChange={handleStreamSelectionChange}
+            >
+                <SelectTrigger id="stream-select" className="w-full">
+                <SelectValue placeholder="Selecione uma fonte e qualidade" />
+                </SelectTrigger>
+                <SelectContent>
+                {streamOptions.map(opt => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                    {opt.label}
+                    </SelectItem>
+                ))}
+                </SelectContent>
+            </Select>
+            </div>
         </div>
-      </div>
+      )}
       <div className="text-xs text-muted-foreground p-2 break-all">
-        URL Atual: {mediaItemForPlayer?.streamUrl || "Nenhuma"}
+        URL Atual: {selectedStreamUrl || "Nenhuma"}
       </div>
     </div>
   );
 }
-
-    

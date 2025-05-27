@@ -16,7 +16,8 @@ import {
   getEpisodesForSeriesAcrossPlaylists, 
   getAllPlaylistsMetadata, 
 } from '@/lib/db';
-import type { SeriesItem, EpisodeItem, PlaylistMetadata, MediaItemForPlayer } from '@/lib/constants';
+import type { SeriesItem, EpisodeItem, PlaylistMetadata } from '@/lib/constants';
+// import type { MediaItemForPlayer } from '@/lib/constants'; // No longer used directly by VideoPlayer prop
 
 interface EpisodeSource {
   playlistId: string;
@@ -26,13 +27,13 @@ interface EpisodeSource {
 }
 
 interface DisplayEpisode {
-  id: string; // Unique ID for this display episode, e.g., seriesId_S<season>E<episode>
-  dbEpisodeId?: number; // Original EpisodeItem.id from DB if needed
+  id: string; 
+  dbEpisodeId?: number; 
   title: string; 
   seasonNumber: number;
   episodeNumber: number;
   sources: EpisodeSource[];
-  primaryLogoUrl?: string;
+  primaryLogoUrl?: string; // A representative logo for this specific SxxExx, could be from one of its sources
 }
 
 interface GroupedEpisodes {
@@ -54,18 +55,6 @@ export default function SeriesPlayerPage() {
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const mediaItemForPlayer: MediaItemForPlayer | null = useMemo(() => {
-    if (!selectedDisplayEpisode || !selectedSourceStreamUrl || !seriesInfo) return null;
-    return {
-      id: selectedDisplayEpisode.id, // Use o ID único do DisplayEpisode
-      streamUrl: selectedSourceStreamUrl,
-      title: `${seriesInfo.title} - ${selectedDisplayEpisode.title}`,
-      type: 'series_episode', // Especifica que é um episódio
-      posterUrl: selectedDisplayEpisode.primaryLogoUrl || seriesInfo.logoUrl,
-    };
-  }, [selectedDisplayEpisode, selectedSourceStreamUrl, seriesInfo]);
-
 
   const fetchSeriesData = useCallback(async () => {
     if (isNaN(seriesNumericId)) {
@@ -93,6 +82,7 @@ export default function SeriesPlayerPage() {
       setAllRawEpisodes(episodesData);
 
       if (episodesData.length > 0) {
+        // Auto-select the first season available
         const firstSeason = episodesData.reduce((min, ep) => Math.min(min, ep.seasonNumber || Infinity), Infinity);
         if (firstSeason !== Infinity) {
           setSelectedSeason(firstSeason.toString());
@@ -135,13 +125,13 @@ export default function SeriesPlayerPage() {
         }
       } else {
         episodeMap.set(episodeKey, {
-          id: `${seriesNumericId}_${episodeKey}`, // ID único para o DisplayEpisode
+          id: `${seriesNumericId}_${episodeKey}`, 
           dbEpisodeId: rawEp.id,
           title: rawEp.title, 
           seasonNumber: rawEp.seasonNumber,
           episodeNumber: rawEp.episodeNumber,
           sources: [source],
-          primaryLogoUrl: source.logoUrl || seriesInfo?.logoUrl,
+          primaryLogoUrl: source.logoUrl || seriesInfo?.logoUrl, 
         });
       }
     });
@@ -169,20 +159,21 @@ export default function SeriesPlayerPage() {
       setSelectedSourceStreamUrl(sourceStreamUrl);
     } else if (episode.sources.length > 0) {
       setSelectedSourceStreamUrl(episode.sources[0].streamUrl); // Default to first source
+    } else {
+      setSelectedSourceStreamUrl(null); // No sources for this episode
     }
   };
   
   useEffect(() => {
     if (selectedSeason && groupedAndSortedEpisodes[parseInt(selectedSeason)]?.length > 0) {
       const firstEpisodeOfSeason = groupedAndSortedEpisodes[parseInt(selectedSeason)][0];
-      if (firstEpisodeOfSeason && !selectedDisplayEpisode) { 
+      // Auto-play first episode of selected season IF no episode is currently selected OR if the selected episode is not in the current season
+      if (firstEpisodeOfSeason && (!selectedDisplayEpisode || selectedDisplayEpisode.seasonNumber !== parseInt(selectedSeason))) { 
          handleEpisodePlay(firstEpisodeOfSeason);
       }
     } else if (!selectedSeason && availableSeasons.length > 0) {
-        // Se nenhuma temporada estiver selecionada mas houver temporadas, selecione a primeira
         const firstAvailableSeason = availableSeasons[0].toString();
         setSelectedSeason(firstAvailableSeason);
-        // O efeito acima será acionado novamente para tocar o primeiro episódio da primeira temporada
     }
 
   }, [selectedSeason, groupedAndSortedEpisodes, selectedDisplayEpisode, availableSeasons]);
@@ -191,8 +182,13 @@ export default function SeriesPlayerPage() {
   if (isLoading && !seriesInfo) {
     return (
       <div className="container mx-auto p-4 md:p-6 space-y-6">
-        <Skeleton className="h-10 w-1/3 mb-2" />
-        <Skeleton className="h-8 w-2/3 mb-6" />
+        <div className="flex items-center gap-3">
+            <Skeleton className="h-20 w-14 md:h-28 md:w-[74px] rounded-md" />
+            <div className="flex-1 space-y-2">
+                <Skeleton className="h-8 w-3/4" />
+                <Skeleton className="h-6 w-1/2" />
+            </div>
+        </div>
         <Skeleton className="w-full aspect-video rounded-lg" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <Skeleton className="h-10 w-full" />
@@ -221,7 +217,7 @@ export default function SeriesPlayerPage() {
       return (
           <div className="container mx-auto p-4 md:p-6 text-center">
               <PageHeader title="Série não Carregada" description="Não foi possível carregar informações da série."/>
-               <Button onClick={() => router.back()}>
+               <Button onClick={() => router.back()} className="mt-4">
                   <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
               </Button>
           </div>
@@ -229,14 +225,18 @@ export default function SeriesPlayerPage() {
   }
 
   const episodesInSelectedSeason = selectedSeason ? groupedAndSortedEpisodes[parseInt(selectedSeason)] || [] : [];
-  const currentEpisodeFullTitle = mediaItemForPlayer?.title || seriesInfo.title;
+  const currentEpisodeFullTitle = selectedDisplayEpisode && seriesInfo ? `${seriesInfo.title} - S${String(selectedDisplayEpisode.seasonNumber).padStart(2, '0')}E${String(selectedDisplayEpisode.episodeNumber).padStart(2, '0')} - ${selectedDisplayEpisode.title}` : seriesInfo.title;
 
   return (
     <div className="container mx-auto p-0 md:p-2 lg:p-4 space-y-4 md:space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          {seriesInfo.logoUrl && (
-            <img src={seriesInfo.logoUrl} alt={seriesInfo.title} className="h-20 w-auto md:h-28 object-contain rounded-md bg-muted p-1" onError={(e) => e.currentTarget.style.display = 'none'}/>
+          {seriesInfo.logoUrl ? (
+            <img src={seriesInfo.logoUrl} alt={seriesInfo.title} className="h-20 w-auto md:h-28 object-contain rounded-md bg-muted p-1 shadow" onError={(e) => e.currentTarget.style.display = 'none'}/>
+          ) : (
+             <div className="h-20 w-14 md:h-28 md:w-[74px] flex items-center justify-center bg-muted rounded-md shadow">
+              <Clapperboard className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground" />
+            </div>
           )}
           <div className="flex-1">
             <PageHeader title={seriesInfo.title} description={seriesInfo.genre || seriesInfo.groupTitle || 'Série de TV'} />
@@ -248,27 +248,27 @@ export default function SeriesPlayerPage() {
         </Button>
       </div>
 
-      <VideoPlayer item={mediaItemForPlayer} />
+      <VideoPlayer src={selectedSourceStreamUrl} />
 
-      <Tabs value={selectedSeason || undefined} onValueChange={setSelectedSeason} className="w-full">
+      <Tabs value={selectedSeason || (availableSeasons.length > 0 ? availableSeasons[0].toString() : undefined)} onValueChange={setSelectedSeason} className="w-full">
         <ScrollArea className="w-full whitespace-nowrap rounded-md border">
             <TabsList className="bg-card border-b">
             {availableSeasons.length > 0 ? availableSeasons.map(seasonNum => (
                 <TabsTrigger key={seasonNum} value={seasonNum.toString()} className="text-sm px-3 py-2">
                 Temporada {seasonNum}
                 </TabsTrigger>
-            )) : <div className="p-2 text-muted-foreground">Nenhuma temporada encontrada.</div>}
+            )) : <div className="p-3 text-muted-foreground text-sm">Nenhuma temporada encontrada.</div>}
             </TabsList>
             <ScrollBar orientation="horizontal" />
         </ScrollArea>
 
         {availableSeasons.map(seasonNum => (
           <TabsContent key={seasonNum} value={seasonNum.toString()} className="mt-0">
-            {selectedSeason === seasonNum.toString() && ( // Renderiza apenas o conteúdo da aba ativa
+            {selectedSeason === seasonNum.toString() && ( 
               <ScrollArea className="h-[300px] w-full rounded-md border p-1 md:p-2">
                 {episodesInSelectedSeason.length > 0 ? (
                   <ul className="space-y-1">
-                    {episodesInSelectedSeason.map((ep, idx) => (
+                    {episodesInSelectedSeason.map((ep) => (
                       <li key={ep.id} 
                           className={`p-2.5 rounded-md hover:bg-muted/50 transition-colors group ${selectedDisplayEpisode?.id === ep.id ? 'bg-primary/10 ring-1 ring-primary' : ''}`}>
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -282,7 +282,7 @@ export default function SeriesPlayerPage() {
                                     Ep. {ep.episodeNumber}: {ep.title}
                                 </button>
                                 {ep.primaryLogoUrl && seriesInfo.logoUrl !== ep.primaryLogoUrl && (
-                                    <img src={ep.primaryLogoUrl} alt={`Thumbnail ${ep.title}`} className="h-10 w-auto rounded mt-1 opacity-70 group-hover:opacity-100" onError={(e) => e.currentTarget.style.display = 'none'}/>
+                                    <img src={ep.primaryLogoUrl} alt={`Thumbnail ${ep.title}`} className="h-10 w-auto rounded mt-1 opacity-70 group-hover:opacity-100 object-cover" onError={(e) => e.currentTarget.style.display = 'none'}/>
                                 )}
                             </div>
                           
@@ -309,12 +309,17 @@ export default function SeriesPlayerPage() {
                           )}
                            {ep.sources.length === 1 && (
                                <Button 
-                                    variant={selectedDisplayEpisode?.id === ep.id ? "default" : "ghost"}
+                                    variant={selectedDisplayEpisode?.id === ep.id && selectedSourceStreamUrl === ep.sources[0].streamUrl ? "default" : "ghost"}
                                     size="sm" 
-                                    onClick={() => handleEpisodePlay(ep)}
+                                    onClick={() => handleEpisodePlay(ep, ep.sources[0].streamUrl)}
                                     className="w-full sm:w-auto text-xs h-9 mt-1 sm:mt-0"
                                 >
                                     <Tv className="mr-2 h-3 w-3"/> Assistir ({ep.sources[0].playlistName})
+                                </Button>
+                           )}
+                           {ep.sources.length === 0 && (
+                                <Button variant="ghost" size="sm" disabled className="w-full sm:w-auto text-xs h-9 mt-1 sm:mt-0">
+                                    Nenhuma Fonte
                                 </Button>
                            )}
                         </div>
@@ -335,5 +340,3 @@ export default function SeriesPlayerPage() {
     </div>
   );
 }
-
-    
