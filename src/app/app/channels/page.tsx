@@ -11,21 +11,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 const ITEMS_PER_PAGE = 28; 
 
-interface AggregatedChannel extends ContentItemForCard {
-  originalItems: PlaylistItem[];
-}
-
 export default function ChannelsPage() {
+  const [allFetchedRawChannels, setAllFetchedRawChannels] = useState<PlaylistItem[]>([]);
   const [aggregatedChannelItems, setAggregatedChannelItems] = useState<ContentItemForCard[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  
+  const [isLoading, setIsLoading] = useState(true); // For initial full page load
+  const [isPaginating, setIsPaginating] = useState(false); // For loading more items specifically
+
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   
-  // For pagination of aggregated channels
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [allFetchedRawChannels, setAllFetchedRawChannels] = useState<PlaylistItem[]>([]);
-
 
   const aggregateChannels = useCallback((rawChannels: PlaylistItem[]): ContentItemForCard[] => {
     const channelGroups = new Map<string, PlaylistItem[]>();
@@ -41,109 +38,101 @@ export default function ChannelsPage() {
 
     const aggregated: ContentItemForCard[] = [];
     channelGroups.forEach((items, baseName) => {
-      const representativeItem = items[0]; // Use first item for common details
+      const representativeItem = items[0]; 
       const uniqueQualities = Array.from(new Set(items.map(i => i.quality).filter(Boolean) as string[])).sort();
       
       aggregated.push({
-        id: baseName, // Use baseName as a unique ID for the aggregated card
+        id: baseName, 
         title: baseName,
         imageUrl: representativeItem.logoUrl,
         type: 'channel',
         dataAiHint: `channel ${baseName}`.substring(0, 50).trim().toLowerCase(),
         qualities: uniqueQualities.length > 0 ? uniqueQualities : undefined,
         sourceCount: items.length,
-        // streamUrl is intentionally omitted for aggregated card; player page should handle selection
       });
     });
-    return aggregated.sort((a, b) => a.title.localeCompare(b.title)); // Sort by title
+    return aggregated.sort((a, b) => a.title.localeCompare(b.title));
   }, []);
   
-  const fetchAndAggregateChannels = useCallback(async (playlistId: string, initialFetch: boolean = false) => {
-    if (!playlistId) return;
-    setIsLoading(true);
-    try {
-      // For channels, we fetch ALL channels from the playlist at once to perform aggregation.
-      // Pagination will be applied to the *aggregated* list.
-      // If this becomes too slow for extremely large playlists, a more complex server-side/worker aggregation might be needed.
-      const rawItemsFromDB = await getPlaylistItems(playlistId, 'channel'); // Fetches all channels
-      
-      if (initialFetch) {
-        setAllFetchedRawChannels(rawItemsFromDB);
-        const aggregated = aggregateChannels(rawItemsFromDB);
-        const paginatedAggregated = aggregated.slice(0, ITEMS_PER_PAGE);
-        setAggregatedChannelItems(paginatedAggregated);
-        setHasMore(aggregated.length > ITEMS_PER_PAGE);
-        setCurrentPage(1);
-      } else {
-        // This part handles loading more *aggregated* items
-        const currentAggregatedList = aggregateChannels(allFetchedRawChannels);
-        const offset = currentPage * ITEMS_PER_PAGE;
-        const nextPageItems = currentAggregatedList.slice(offset, offset + ITEMS_PER_PAGE);
-        setAggregatedChannelItems(prev => [...prev, ...nextPageItems]);
-        setHasMore(currentAggregatedList.length > offset + ITEMS_PER_PAGE);
-      }
-
-    } catch (error) {
-      console.error("Failed to fetch or aggregate channel items:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [aggregateChannels, allFetchedRawChannels, currentPage]);
-
-
+  // Effect 1: Initialize, determine playlist config, fetch ALL raw channels
   useEffect(() => {
-    async function initialize() {
+    async function initializePage() {
       setIsLoading(true);
-      setHasPlaylistsConfigured(null); // Set to null to show loading skeleton
+      setHasPlaylistsConfigured(null); // Show skeleton initially
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
-          setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
+          setHasPlaylistsConfigured(true);
           setActivePlaylistId(firstPlaylistId);
-          await fetchAndAggregateChannels(firstPlaylistId, true); // Initial fetch
+          // Fetch ALL raw channels for this playlist
+          const rawItemsFromDB = await getPlaylistItems(firstPlaylistId, 'channel');
+          setAllFetchedRawChannels(rawItemsFromDB);
+          setCurrentPage(1); // Reset to page 1 whenever raw data changes
         } else {
           setHasPlaylistsConfigured(false);
-          setAggregatedChannelItems([]);
           setAllFetchedRawChannels([]);
+          setAggregatedChannelItems([]); 
         }
       } catch (error) {
         console.error("Failed to initialize channels page:", error);
         setHasPlaylistsConfigured(false);
+        setAllFetchedRawChannels([]);
+        setAggregatedChannelItems([]);
       } finally {
         setIsLoading(false);
       }
     }
-    initialize();
-  }, [fetchAndAggregateChannels]); // fetchAndAggregateChannels will manage its own dependencies
+    initializePage();
+  }, []); // Empty dependency array for one-time init (or based on global playlist selector later)
+
+
+  // Effect 2: Aggregate and paginate whenever raw data or current page changes
+  useEffect(() => {
+    if (!hasPlaylistsConfigured || isLoading) { 
+      // Don't process if initial load is happening or no playlists configured
+      // If isLoading is false but allFetchedRawChannels is empty (due to no channels in playlist),
+      // it will proceed and correctly set empty items.
+      if (!isLoading && hasPlaylistsConfigured && allFetchedRawChannels.length === 0) {
+         setAggregatedChannelItems([]);
+         setHasMore(false);
+      }
+      return;
+    }
+    
+    setIsPaginating(true); // Indicate pagination processing
+
+    const aggregated = aggregateChannels(allFetchedRawChannels);
+    const offset = (currentPage - 1) * ITEMS_PER_PAGE;
+    const nextPageItemsToDisplay = aggregated.slice(offset, offset + ITEMS_PER_PAGE);
+
+    if (currentPage === 1) {
+      setAggregatedChannelItems(nextPageItemsToDisplay);
+    } else {
+      // Append new items, ensuring no duplicates if this effect somehow re-runs
+      setAggregatedChannelItems(prevItems => {
+          const existingIds = new Set(prevItems.map(item => item.id));
+          const trulyNewItems = nextPageItemsToDisplay.filter(item => !existingIds.has(item.id));
+          // Only add if there are actually new items to prevent infinite loops if data hasn't changed.
+          if (trulyNewItems.length > 0) {
+            return [...prevItems, ...trulyNewItems];
+          }
+          return prevItems;
+      });
+    }
+    setHasMore(aggregated.length > offset + ITEMS_PER_PAGE);
+    setIsPaginating(false);
+
+  }, [allFetchedRawChannels, currentPage, aggregateChannels, hasPlaylistsConfigured, isLoading]);
+
 
   const loadMoreItems = () => {
-    if (activePlaylistId && hasMore && !isLoading) {
-      setCurrentPage(prevPage => {
-        const nextPage = prevPage + 1;
-        // We don't re-fetch raw channels, just re-paginate the existing aggregated list
-        // The fetchAndAggregateChannels handles this logic based on `initialFetch` flag.
-        // However, the current fetchAndAggregateChannels is not setup for this,
-        // so we need to adjust how `loadMoreItems` works with pre-fetched raw data.
-        
-        // Re-aggregate and slice the next page
-        const currentAggregatedList = aggregateChannels(allFetchedRawChannels);
-        const offset = nextPage * ITEMS_PER_PAGE; // offset for the *next* page
-        const newPageAggregatedItems = currentAggregatedList.slice((nextPage-1)*ITEMS_PER_PAGE, nextPage*ITEMS_PER_PAGE);
-
-        setAggregatedChannelItems(prevAggregated => {
-             // Ensure we don't add duplicates if items were already loaded
-            const existingIds = new Set(prevAggregated.map(item => item.id));
-            const trulyNewItems = newPageAggregatedItems.filter(item => !existingIds.has(item.id));
-            return [...prevAggregated, ...trulyNewItems];
-        });
-        setHasMore(currentAggregatedList.length > nextPage * ITEMS_PER_PAGE);
-        return nextPage;
-      });
+    if (hasMore && !isLoading && !isPaginating) { 
+      setCurrentPage(prevPage => prevPage + 1);
     }
   };
   
-  if (hasPlaylistsConfigured === null) {
+  if (hasPlaylistsConfigured === null || (isLoading && aggregatedChannelItems.length === 0) ) {
     return (
       <div className="container mx-auto px-0">
         <PageHeader title="Canais ao Vivo" description="Assista seus canais de TV favoritos."/>
@@ -164,21 +153,22 @@ export default function ChannelsPage() {
     <div className="container mx-auto px-0">
       <PageHeader title="Canais ao Vivo" description="Assista seus canais de TV favoritos."/>
       {hasPlaylistsConfigured ? (
-        aggregatedChannelItems.length > 0 || isLoading ? (
+        (aggregatedChannelItems.length > 0 || isLoading || isPaginating) ? ( // Show grid if items exist or any loading is active
           <ContentGrid 
             items={aggregatedChannelItems} 
             type="channel" 
-            isLoading={isLoading && aggregatedChannelItems.length === 0} // Show loading only if no items yet
+            isLoading={isLoading && aggregatedChannelItems.length === 0} // Grid's own skeleton for initial load
             loadMoreItems={loadMoreItems}
             hasMore={hasMore}
           />
         ) : (
-          <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado nas suas playlists configuradas.</p>
+          // Only show "no channels" if not loading and no items
+          !isLoading && !isPaginating && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado nas suas playlists configuradas.</p>
         )
       ) : (
         <PlaceholderContent type="canais" />
       )}
-       {isLoading && aggregatedChannelItems.length > 0 && (
+       {isPaginating && aggregatedChannelItems.length > 0 && ( // Show specific "loading more" message
         <p className="text-muted-foreground text-center py-8">Carregando mais canais...</p>
       )}
     </div>
