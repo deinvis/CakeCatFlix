@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { VideoPlayer } from '@/components/player/video-player';
+import VideoPlayer from '@/components/player/video-player'; // Changed to default import
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -98,7 +98,8 @@ export default function MoviePlayerPage() {
       setStreamOptions(finalOptions);
 
       if (finalOptions.length > 0) {
-        const primaryOptionInFinal = finalOptions.find(opt => opt.streamUrl === mainMovie.streamUrl);
+        // Prioritize the stream that matches the primaryMovieInfo's streamUrl and playlistDbId
+        const primaryOptionInFinal = finalOptions.find(opt => opt.streamUrl === mainMovie.streamUrl && opt.id.startsWith(mainMovie.playlistDbId));
         setSelectedStreamOptionId(primaryOptionInFinal ? primaryOptionInFinal.id : finalOptions[0].id);
       } else {
         setError(`Nenhuma fonte de stream disponível para "${mainMovie.title}".`);
@@ -177,10 +178,26 @@ export default function MoviePlayerPage() {
               src={primaryMovieInfo.logoUrl} 
               alt={primaryMovieInfo.title} 
               className="h-20 w-auto md:h-28 object-contain rounded-md bg-muted p-1 shadow"
-              onError={(e) => e.currentTarget.style.display = 'none'}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.onerror = null; // prevent infinite loop if placeholder also fails
+                target.src = `https://placehold.co/100x150.png`; 
+                target.style.display = 'none'; // Optionally hide if placeholder also fails or is not desired
+                // Show the div with Film icon as a fallback if image fails to load
+                const fallbackIconContainer = target.nextElementSibling;
+                if (fallbackIconContainer && fallbackIconContainer.classList.contains('fallback-film-icon-container')) {
+                   fallbackIconContainer.classList.remove('hidden');
+                }
+              }}
             />
           ) : (
-            <div className="h-20 w-14 md:h-28 md:w-[74px] flex items-center justify-center bg-muted rounded-md shadow">
+            <div className="h-20 w-14 md:h-28 md:w-[74px] flex items-center justify-center bg-muted rounded-md shadow fallback-film-icon-container">
+              <Film className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground" />
+            </div>
+          )}
+          {/* Fallback icon container, initially hidden if primaryMovieInfo.logoUrl exists */}
+          {!primaryMovieInfo.logoUrl && (
+            <div className="h-20 w-14 md:h-28 md:w-[74px] flex items-center justify-center bg-muted rounded-md shadow fallback-film-icon-container">
               <Film className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground" />
             </div>
           )}
@@ -196,7 +213,7 @@ export default function MoviePlayerPage() {
         </Button>
       </div>
       
-      <VideoPlayer src={selectedStreamUrl} />
+      <VideoPlayer src={selectedStreamUrl} title={primaryMovieInfo.title} />
 
       {streamOptions.length > 1 && (
         <div className="grid grid-cols-1 gap-4 p-4 bg-card rounded-lg shadow">

@@ -10,38 +10,59 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Validar a URL de destino (opcional, mas recomendado para segurança)
-    // Por exemplo, verificar se é um HTTP/HTTPS válido ou se pertence a domínios esperados
-    // new URL(targetUrl); // Lança erro se for inválida
-
+    console.log(`Proxying request for: ${targetUrl}`);
     const response = await fetch(targetUrl, {
       headers: {
-        // Alguns servidores podem exigir um User-Agent
-        'User-Agent': 'CatCakeFlix-Playlist-Proxy/1.0',
+        'User-Agent': 'CatCakeFlix-Proxy/1.0',
+        // Pass along range headers if present in the original request to the proxy
+        // This is a very basic attempt and might not cover all streaming scenarios.
+        // Range: request.headers.get('range') || undefined, // TODO: This needs more robust handling
       },
+      // Important for streaming: use a ReadableStream
+      // However, Next.js API routes might buffer the whole response by default on some platforms.
+      // redirect: 'follow', // fetch handles redirects by default
     });
 
     if (!response.ok) {
+      console.error(`Proxy: Falha ao buscar a URL de destino: ${response.status} ${response.statusText} para ${targetUrl}`);
       return NextResponse.json(
         { error: `Falha ao buscar a URL de destino: ${response.status} ${response.statusText}` },
         { status: response.status }
       );
     }
 
-    const contentType = response.headers.get('content-type') || 'text/plain; charset=utf-8';
-    const textContent = await response.text();
+    // Get the body as a ReadableStream
+    const body = response.body;
+    if (!body) {
+      console.error(`Proxy: Corpo da resposta vazio para ${targetUrl}`);
+      return NextResponse.json({ error: 'Corpo da resposta vazio da URL de destino.' }, { status: 500 });
+    }
+    
+    // Get content type and length from the original response
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const contentLength = response.headers.get('content-length');
 
-    // Criar uma nova resposta com o conteúdo e o tipo de conteúdo corretos
-    const proxyResponse = new NextResponse(textContent, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-      },
+    const headers = new Headers();
+    headers.set('Content-Type', contentType);
+    if (contentLength) {
+      headers.set('Content-Length', contentLength);
+    }
+    // Attempt to enable seeking by accepting range requests.
+    // This is a very basic approach. True streaming proxies are more complex.
+    headers.set('Accept-Ranges', 'bytes');
+
+
+    // Return a new response with the stream and original headers
+    // Vercel Edge/Node.js runtimes have different behaviors with ReadableStream.
+    // This might work better in Node.js runtime. Edge runtime might buffer.
+    return new NextResponse(body, {
+      status: response.status, // Use original status (e.g., 206 Partial Content)
+      statusText: response.statusText,
+      headers: headers,
     });
-    return proxyResponse;
 
   } catch (error: any) {
-    console.error('Erro no proxy API:', error);
+    console.error('Erro no proxy API:', error, `Target URL: ${targetUrl}`);
     let errorMessage = 'Erro interno do servidor ao tentar buscar a URL.';
     if (error.message) {
         errorMessage = `Erro ao processar a URL no proxy: ${error.message}`;
