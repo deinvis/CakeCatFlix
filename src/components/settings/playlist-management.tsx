@@ -9,13 +9,13 @@ import {
   LOCALSTORAGE_STARTUP_PAGE_KEY,
   LOCALSTORAGE_THEME_KEY,
   LOCALSTORAGE_PARENTAL_CONTROL_KEY,
-  type PlaylistMetadata, // Updated type
-  type PlaylistItem, // Updated type
+  type PlaylistMetadata, 
+  type PlaylistItem, 
   type PlaylistSourceDetailsFile,
   type PlaylistSourceDetailsUrl,
   type PlaylistSourceDetailsXtream,
 } from '@/lib/constants';
-import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard } from 'lucide-react';
+import { Trash2, Edit, PlusCircle, ListChecks, UploadCloud, Link2, ListVideo, Tv2, Film, Clapperboard, Users } from 'lucide-react'; // Added Users for episodes
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,15 +33,15 @@ import { Label } from '@/components/ui/label';
 import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from '@/components/ui/separator';
-import { parseM3U } from '@/lib/m3u-parser'; // Updated parser
-import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; // This will also need to be updated to produce new PlaylistItem[]
+import { parseM3U } from '@/lib/m3u-parser'; 
+import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; 
 import { 
   addPlaylistWithItems, 
   getAllPlaylistsMetadata, 
   updatePlaylistMetadata, 
   deletePlaylistAndItems,
   clearAllAppData,
-} from '@/lib/db'; // DB functions using new types
+} from '@/lib/db'; 
 
 export function PlaylistManagement() {
   const [playlists, setPlaylists] = useState<PlaylistMetadata[]>([]);
@@ -97,16 +97,15 @@ export function PlaylistManagement() {
   const handleAddNewPlaylist = async (type: 'file' | 'url' | 'xtream') => {
     setIsLoading(true);
     let nameToAdd = newPlaylistName.trim();
-    const playlistId = Date.now().toString(); // Unique ID for the playlist
+    const playlistId = Date.now().toString(); 
     let itemsToAdd: PlaylistItem[] = [];
     let sourceDetails: PlaylistMetadata['sourceDetails'];
     
-    // Base metadata structure
-    let metadataBase: PlaylistMetadata = { // Renamed to avoid conflict in catch block
+    let metadataBase: PlaylistMetadata = {
       id: playlistId,
-      name: '', // Will be set below
+      name: '', 
       sourceType: type,
-      sourceDetails: {} as any, // Placeholder, will be filled
+      sourceDetails: {} as any, 
       createdAt: Date.now(),
       status: 'pending',
     };
@@ -124,7 +123,7 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); // Save initial metadata
+        await updatePlaylistMetadata(metadataBase); 
         
         const fileContent = await newPlaylistFile.text();
         itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
@@ -144,6 +143,7 @@ export function PlaylistManagement() {
         metadataBase.status = 'processing';
         await updatePlaylistMetadata(metadataBase); 
 
+        // TODO: Consider using a CORS proxy API route if direct fetch fails often
         const response = await fetch(url); 
         if (!response.ok) {
           throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
@@ -170,28 +170,27 @@ export function PlaylistManagement() {
         await updatePlaylistMetadata(metadataBase); 
 
         // fetchXtreamPlaylistItems needs to be updated to return PlaylistItem[] matching the new structure
+        // This assumes fetchXtreamPlaylistItems is adapted to the new PlaylistItem structure from parser
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
-      // Add items and update final metadata
-      // addPlaylistWithItems will update counts and set status to 'completed'
       await addPlaylistWithItems(metadataBase, itemsToAdd); 
       
       toast({
         title: `Playlist Adicionada (${type.toUpperCase()})`,
-        description: `"${nameToAdd}" foi processada com ${itemsToAdd.length} itens.`,
+        description: `"${nameToAdd}" foi processada com ${itemsToAdd.length} itens brutos.`,
       });
 
-      await fetchPlaylists(); // Refresh list
+      await fetchPlaylists(); 
       resetAddPlaylistForms();
       const closeButton = document.querySelector('[data-radix-dialog-close="true"]') as HTMLElement | null;
       if (closeButton) closeButton.click();
 
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
-        const failedMetadata = { // Use a different name for the metadata object in the catch block
+        const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
-            status: 'failed' as 'failed', // Type assertion
+            status: 'failed' as 'failed', 
             statusMessage: error.message
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
@@ -289,7 +288,7 @@ export function PlaylistManagement() {
         duration: 5000,
       });
       setShowClearDataDialog(false);
-    } catch (error: any) { // Added missing curly brace here
+    } catch (error: any) {
       console.error("Error clearing all data:", error);
       toast({ title: "Erro ao Limpar Dados", description: error.message, variant: "destructive" });
     } finally {
@@ -434,13 +433,15 @@ export function PlaylistManagement() {
                         </span>
                       </span>
                       <div className="text-xs text-muted-foreground flex items-center flex-wrap gap-x-2 gap-y-1 mt-1">
-                        <span>Total: {playlist.itemCount ?? 0}</span>
+                        <span>Total Bruto: {playlist.itemCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
                         <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1 text-sky-500"/> {playlist.channelCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
                         <span className="flex items-center"><Film className="h-3 w-3 mr-1 text-orange-500"/> {playlist.movieCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesEpisodeCount ?? 0} (Episódios) / {playlist.seriesCount ?? 0} (Séries)</span>
+                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesCount ?? 0} (Séries)</span>
+                        <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
+                        <span className="flex items-center"><Users className="h-3 w-3 mr-1 text-purple-500"/> {playlist.episodeCount ?? 0} (Episódios)</span>
                       </div>
                        {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1">Erro: {playlist.statusMessage}</p>}
                     </div>
@@ -485,7 +486,7 @@ export function PlaylistManagement() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                Esta ação não pode ser desfeita. Isso apagará permanentemente a playlist "{playlistToDelete?.name}" e todos os seus {playlistToDelete?.itemCount ?? 0} itens.
+                                Esta ação não pode ser desfeita. Isso apagará permanentemente a playlist "{playlistToDelete?.name}" e todos os seus itens ({playlistToDelete?.channelCount ?? 0} canais, {playlistToDelete?.movieCount ?? 0} filmes, {playlistToDelete?.seriesCount ?? 0} séries, {playlistToDelete?.episodeCount ?? 0} episódios).
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
@@ -543,4 +544,4 @@ export function PlaylistManagement() {
     </Card>
   );
 }
-
+```
