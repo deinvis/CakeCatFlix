@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
-import { Tv2, Film, Clapperboard, Settings as SettingsIcon } from 'lucide-react';
+import { Tv2, Film, Clapperboard, Settings as SettingsIcon, History, Heart } from 'lucide-react';
 
-export const APP_NAME = "CatCakeStream";
+export const APP_NAME = "CatCakeFlix";
 
 interface NavLink {
   href: string;
@@ -10,17 +10,21 @@ interface NavLink {
 }
 
 export const NAV_LINKS: NavLink[] = [
-  { href: "/app/channels", label: "Channels", icon: Tv2 },
-  { href: "/app/movies", label: "Movies", icon: Film },
-  { href: "/app/series", label: "Series", icon: Clapperboard },
+  { href: "/app/channels", label: "Canais", icon: Tv2 },
+  { href: "/app/movies", label: "Filmes", icon: Film },
+  { href: "/app/series", label: "Séries", icon: Clapperboard },
+  { href: "/app/recentes", label: "Recentes", icon: History },
+  { href: "/app/favoritos", label: "Favoritos", icon: Heart },
 ];
 
-export const SETTINGS_NAV_LINK: NavLink = { href: "/app/settings", label: "Settings", icon: SettingsIcon };
+export const SETTINGS_NAV_LINK: NavLink = { href: "/app/settings", label: "Configurações", icon: SettingsIcon };
 
 export const STARTUP_PAGES = [
-  { value: "channels", label: "Channels" },
-  { value: "movies", label: "Movies" },
-  { value: "series", label: "Series" },
+  { value: "channels", label: "Canais" },
+  { value: "movies", label: "Filmes" },
+  { value: "series", label: "Séries" },
+  { value: "recentes", label: "Recentes" },
+  { value: "favoritos", label: "Favoritos" },
 ];
 
 export const MOCK_PLAYLISTS = [
@@ -49,3 +53,9 @@ export const MOCK_CONTENT_ITEMS = (count = 12, hint = "abstract scene"): MockCon
 
 export const MOCK_MOVIE_GENRES = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Thriller"];
 export const MOCK_SERIES_GENRES = ["Animation", "Crime", "Documentary", "Fantasy", "Mystery", "Sitcom"];
+
+// LocalStorage keys
+export const LOCALSTORAGE_PLAYLISTS_KEY = 'catcakestream_playlists';
+export const LOCALSTORAGE_STARTUP_PAGE_KEY = 'catcakestream_startup_page';
+export const LOCALSTORAGE_THEME_KEY = 'catcakestream_theme';
+export const LOCALSTORAGE_PARENTAL_CONTROL_KEY = 'catcakestream_parental_control_enabled';

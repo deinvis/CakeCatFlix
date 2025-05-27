@@ -24,7 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    // The 'dark' class will be managed by ThemeToggle component based on user preference
+    <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
