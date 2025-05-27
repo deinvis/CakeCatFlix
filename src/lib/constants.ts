@@ -57,18 +57,21 @@ export interface PlaylistItem {
   episodeNumber?: number;
 }
 
-// This interface is for what ContentCard expects, and will need to be adapted from PlaylistItem
+// This interface is for what ContentCard expects
 export interface ContentItemForCard {
-  id: string; // Needs to be string for ContentCard key and link construction (usually PlaylistItem.id.toString())
-  title: string; // Could be PlaylistItem.title, PlaylistItem.seriesTitle (for series card), or PlaylistItem.baseChannelName (for channel card)
-  imageUrl?: string; // logoUrl
-  type: 'movie' | 'series' | 'channel'; // Derived from itemType, or a broader category for display
-  genre?: string; // groupTitle or refined genre
+  id: string; 
+  title: string; 
+  imageUrl?: string; 
+  type: 'movie' | 'series' | 'channel'; 
+  genre?: string; 
   dataAiHint: string;
-  streamUrl?: string; // Main stream URL or representative URL
+  streamUrl?: string; 
+  
   // For aggregated channels
   qualities?: string[]; 
-  sourceCount?: number;
+  sourceCount?: number; // Number of original streams for an aggregated channel
+  // For series cards (representing the whole series, not an episode)
+  seriesId?: string; // Could be PlaylistItem.tvgId or a derived series ID
 }
 
 export interface PlaylistSourceDetailsFile {
@@ -83,29 +86,29 @@ export interface PlaylistSourceDetailsXtream {
   type: 'xtream';
   host: string;
   username: string;
-  password?: string; // Optional, as some Xtream setups might not require it or it's part of host
+  password?: string; 
 }
 export type PlaylistSourceDetails = PlaylistSourceDetailsFile | PlaylistSourceDetailsUrl | PlaylistSourceDetailsXtream;
 
 
 export interface PlaylistMetadata {
-  id: string; // Unique ID for the playlist
+  id: string; 
   name: string;
   sourceType: 'file' | 'url' | 'xtream';
-  sourceDetails: PlaylistSourceDetails; // Replaces sourceValue, more structured
+  sourceDetails: PlaylistSourceDetails; 
   
   itemCount?: number;
   channelCount?: number;
   movieCount?: number;
-  seriesCount?: number; // Counts series titles, not episodes
-  seriesEpisodeCount?: number; // Counts individual series_episode items
+  seriesCount?: number; 
+  seriesEpisodeCount?: number; 
 
-  status?: 'pending' | 'processing' | 'completed' | 'failed'; // statusDoProcessamento
+  status?: 'pending' | 'processing' | 'completed' | 'failed'; 
   statusMessage?: string;
 
-  createdAt: number; // data de adição
-  lastUpdatedAt?: number; // data da última atualização (tentativa)
-  lastSuccessfulUpdateAt?: number; // data da última atualização bem-sucedida
+  createdAt: number; 
+  lastUpdatedAt?: number; 
+  lastSuccessfulUpdateAt?: number; 
 }
 
 
@@ -126,16 +129,16 @@ export const LOCALSTORAGE_STARTUP_PAGE_KEY = 'catcakeflix_startup_page';
 export const LOCALSTORAGE_THEME_KEY = 'catcakeflix_theme';
 export const LOCALSTORAGE_PARENTAL_CONTROL_KEY = 'catcakeflix_parental_control_enabled';
 export const LOCALSTORAGE_APP_OPEN_COUNT_KEY = 'catcakeflix_app_open_count';
-export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_refresh_'; // Append playlist ID
+export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_refresh_'; 
 
 // IndexedDB constants
-export const DB_NAME = 'CatCakeFlixDB'; // Updated DB Name
-export const DB_VERSION = 2; // Increment version due to schema changes
+export const DB_NAME = 'CatCakeFlixDB'; 
+export const DB_VERSION = 2; 
 export const PLAYLIST_METADATA_STORE = 'playlists';
 export const PLAYLIST_ITEMS_STORE = 'playlistItems';
 
-export const FILE_PLAYLIST_ITEM_LIMIT = 2000; // Updated limit
+export const FILE_PLAYLIST_ITEM_LIMIT = 50; 
 
 // Auto-refresh settings
-export const REFRESH_INTERVAL_MINUTES = 60; // 1 hour
+export const REFRESH_INTERVAL_MINUTES = 60; 
 export const REFRESH_APP_OPEN_TRIGGER_COUNT = 3;

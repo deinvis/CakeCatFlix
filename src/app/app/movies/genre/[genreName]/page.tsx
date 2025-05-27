@@ -5,50 +5,42 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
-import { MOCK_MOVIE_GENRES, type ContentItemForCard, type PlaylistItemCore } from '@/lib/constants';
+import { type ContentItemForCard, type PlaylistItem, MOCK_MOVIE_GENRES } from '@/lib/constants'; // MOCK_MOVIE_GENRES for initial check
 import { getAllPlaylistsMetadata, getPlaylistItemsByGroup } from '@/lib/db';
-import { useParams } from 'next/navigation'; // Use useParams for client component
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const ITEMS_PER_PAGE = 28;
 
-// Helper function (can be moved to a shared utils if used elsewhere)
-const transformPlaylistItemToCardItem = (item: PlaylistItemCore): ContentItemForCard => ({
+const transformPlaylistItemToCardItem = (item: PlaylistItem): ContentItemForCard => ({
   id: item.id!.toString(),
-  title: item.displayName || item.tvgName || 'Unknown Movie',
-  imageUrl: item.tvgLogo,
+  title: item.title,
+  imageUrl: item.logoUrl,
   type: 'movie',
-  genre: item.groupTitle,
-  dataAiHint: `movie ${item.groupTitle || item.displayName || ''}`.substring(0, 50).trim().toLowerCase(),
+  genre: item.genre || item.groupTitle,
+  dataAiHint: `movie ${item.genre || item.groupTitle || item.title || ''}`.substring(0, 50).trim().toLowerCase(),
   streamUrl: item.url,
 });
 
 export default function MovieGenrePage() {
-  const params = useParams<{ genreName: string }>(); // Use hook for params
-  const genreNameDecoded = decodeURIComponent(params.genreName);
+  const params = useParams<{ genreName: string }>();
+  const genreNameDecoded = params.genreName ? decodeURIComponent(params.genreName) : "Unknown Genre";
 
   const [movieItems, setMovieItems] = useState<ContentItemForCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState(false);
+  const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean|null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [genreExists, setGenreExists] = useState<boolean | null>(null);
+  const [genreExistsInMock, setGenreExistsInMock] = useState<boolean | null>(null);
 
 
-  // Validate genre (client-side, consider implications if generateStaticParams is used)
   useEffect(() => {
-    // MOCK_MOVIE_GENRES is used for an initial check.
-    // If a genre is valid in the DB but not in MOCK_MOVIE_GENRES, it would still be fetched.
-    // The "genre not found" UI below relies on this MOCK check.
-    // A more robust check might involve querying the DB for available genres if MOCK_MOVIE_GENRES is not exhaustive.
     const foundGenre = MOCK_MOVIE_GENRES.find(g => g.toLowerCase() === genreNameDecoded.toLowerCase());
-    setGenreExists(!!foundGenre);
-    if (!foundGenre) {
-        console.warn(`Genre "${genreNameDecoded}" not found in MOCK_MOVIE_GENRES. Content might still exist in DB if group titles differ.`);
-    }
+    setGenreExistsInMock(!!foundGenre);
   }, [genreNameDecoded]);
 
 
@@ -57,8 +49,7 @@ export default function MovieGenrePage() {
     setIsLoading(true);
     try {
       const offset = (page - 1) * ITEMS_PER_PAGE;
-      // Use the decoded genre name for fetching from DB, as it should match groupTitle
-      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, ITEMS_PER_PAGE, offset);
+      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, genre, ITEMS_PER_PAGE, offset, 'movie');
       
       const newCardItems = itemsFromDB.map(transformPlaylistItemToCardItem);
       
@@ -67,6 +58,7 @@ export default function MovieGenrePage() {
 
     } catch (error) {
       console.error(`Failed to fetch movies for genre "${genre}":`, error);
+      setMovieItems(prev => page === 1 ? [] : prev); // Clear items on error for first page
     } finally {
       setIsLoading(false);
     }
@@ -74,16 +66,16 @@ export default function MovieGenrePage() {
 
   useEffect(() => {
     async function initialize() {
+      setHasPlaylistsConfigured(null);
       setIsLoading(true);
       try {
         const playlists = await getAllPlaylistsMetadata();
-        if (playlists.length > 0) {
+        if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
-          const firstPlaylistId = playlists[0].id; // Use first playlist
+          const firstPlaylistId = playlists[0].id; 
           setActivePlaylistId(firstPlaylistId);
           setMovieItems([]);
           setCurrentPage(1);
-          // Fetch movies using the decoded genre name
           await fetchMoviesByGenre(firstPlaylistId, genreNameDecoded, 1);
         } else {
           setHasPlaylistsConfigured(false);
@@ -96,31 +88,51 @@ export default function MovieGenrePage() {
         setIsLoading(false);
       }
     }
-    // Initialize regardless of MOCK_MOVIE_GENRES check, rely on DB fetch
-    // The genreExists state is now more for UI display of "not found" if MOCK_MOVIE_GENRES is considered authoritative
-    initialize();
+    if (genreNameDecoded !== "Unknown Genre") {
+        initialize();
+    } else {
+        setIsLoading(false);
+        setHasPlaylistsConfigured(false); // No genre, no playlists effectively
+    }
     
-  }, [genreNameDecoded, fetchMoviesByGenre]); // Removed genreExists from dependency array to always try fetching
+  }, [genreNameDecoded, fetchMoviesByGenre]);
 
   const loadMoreItems = () => {
     if (activePlaylistId && hasMore && !isLoading) {
       const nextPage = currentPage + 1;
-      setCurrentPage(nextPage);
-      fetchMoviesByGenre(activePlaylistId, genreNameDecoded, nextPage);
+      fetchMoviesByGenre(activePlaylistId, genreNameDecoded, nextPage); // fetchMoviesByGenre updates currentPage via its own set state
+      setCurrentPage(nextPage); // Also update here to ensure consistency if fetch fails or for UI
     }
   };
+  
+  if (hasPlaylistsConfigured === null || (isLoading && movieItems.length === 0 && genreNameDecoded !== "Unknown Genre")) {
+    return (
+         <div className="container mx-auto px-0">
+            <div className="mb-4">
+                <Skeleton className="h-10 w-48 rounded-md" />
+            </div>
+            <PageHeader title={genreNameDecoded} description={`Descobrindo os melhores filmes de ${genreNameDecoded}...`} />
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 md:gap-6">
+            {Array.from({ length: 14 }).map((_, i) => (
+                <div key={i} className="aspect-[2/3] w-full">
+                <Skeleton className="h-full w-full rounded-lg" />
+                <Skeleton className="h-4 w-3/4 mt-2 rounded-md" />
+                <Skeleton className="h-3 w-1/2 mt-1 rounded-md" />
+                </div>
+            ))}
+            </div>
+        </div>
+    );
+  }
 
-  // This "genre not found" UI is based on MOCK_MOVIE_GENRES.
-  // If content for a genre exists in DB but not in MOCK_MOVIE_GENRES,
-  // it will still be displayed by ContentGrid. This block might show if MOCK_MOVIE_GENRES is strict.
-  if (genreExists === false && !isLoading && movieItems.length === 0 && !hasPlaylistsConfigured) {
+  if (genreExistsInMock === false && !isLoading && movieItems.length === 0 && hasPlaylistsConfigured === true) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
-        <PageHeader title="Genre Not Found" description={`The movie genre "${genreNameDecoded}" does not seem to exist or no content is available.`} />
+        <PageHeader title="Gênero Não Encontrado" description={`O gênero de filme "${genreNameDecoded}" não parece existir ou nenhum conteúdo está disponível nas suas playlists.`} />
         <Button variant="outline" asChild className="mt-4">
           <Link href="/app/movies">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Movie Genres
+            Voltar para Gêneros de Filmes
           </Link>
         </Button>
       </div>
@@ -134,23 +146,31 @@ export default function MovieGenrePage() {
         <Button variant="outline" asChild>
           <Link href="/app/movies">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Movie Genres
+            Voltar para Gêneros de Filmes
           </Link>
         </Button>
       </div>
-      <PageHeader title={genreNameDecoded} description={`Discover the best ${genreNameDecoded} movies.`} />
+      <PageHeader title={genreNameDecoded} description={`Descubra os melhores filmes de ${genreNameDecoded}.`} />
       {hasPlaylistsConfigured ? (
-        <ContentGrid 
-          items={movieItems} 
-          type="movie" 
-          genre={genreNameDecoded} 
-          isLoading={isLoading}
-          loadMoreItems={loadMoreItems}
-          hasMore={hasMore}
-        />
+        movieItems.length > 0 || isLoading ? (
+            <ContentGrid 
+            items={movieItems} 
+            type="movie" 
+            genre={genreNameDecoded} 
+            isLoading={isLoading && movieItems.length === 0}
+            loadMoreItems={loadMoreItems}
+            hasMore={hasMore}
+            />
+        ) : (
+             !isLoading && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado para o gênero "{genreNameDecoded}" nas suas playlists.</p>
+        )
       ) : (
-         isLoading ? <p className="text-muted-foreground text-center py-8">Verificando playlists e filmes...</p> : <PlaceholderContent type="movies" message={`No playlists configured or no ${genreNameDecoded} movies found.`}/>
+         <PlaceholderContent type="filmes" message={`Nenhuma playlist configurada ou nenhum filme de ${genreNameDecoded} encontrado.`}/>
+      )}
+       {isLoading && movieItems.length > 0 && (
+        <p className="text-muted-foreground text-center py-8">Carregando mais filmes...</p>
       )}
     </div>
   );
 }
+
