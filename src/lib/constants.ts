@@ -28,77 +28,75 @@ export const STARTUP_PAGES = [
   { value: "favoritos", label: "Favoritos" },
 ];
 
-export type PlaylistItemType = 'channel' | 'movie' | 'series_episode';
-
-// This is the generic interface returned by the M3U parser
+// Generic interface for items parsed from M3U before normalization
 export interface PlaylistItem {
-  id?: number; // May not be needed for parser output if DB assigns it
-  playlistDbId: string; 
-
-  itemType: PlaylistItemType;
-  title: string; 
-  streamUrl: string;
-  logoUrl?: string; 
+  playlistDbId: string; // Will be assigned when storing
+  itemType: 'channel' | 'movie' | 'series_episode'; // Type inferred by parser
   
-  groupTitle?: string; 
-  originalGroupTitle?: string; 
+  title: string; // Typically tvg-name or the title after the last comma in #EXTINF
+  streamUrl: string;
+  logoUrl?: string; // From tvg-logo
+  
+  originalGroupTitle?: string; // Raw group-title from M3U
+  groupTitle?: string; // Normalized group title (used as genre for movies/series)
 
   tvgId?: string;
-  tvgName?: string; 
-
-  genre?: string; 
-  year?: number; 
+  tvgName?: string; // Raw tvg-name
+  
+  // Common fields, might be populated based on itemType and parsing
+  genre?: string; // Usually derived from normalized groupTitle
+  year?: number; // For movies
 
   // Channel specific
-  baseChannelName?: string; 
-  quality?: string; 
+  baseChannelName?: string; // e.g., "ESPN" from "ESPN FHD"
+  quality?: string; // e.g., "FHD"
 
-  // Series specific (extracted from episode context)
-  seriesTitle?: string; 
+  // Series specific (for series_episode type)
+  seriesTitle?: string; // Title of the series itself
   seasonNumber?: number;
   episodeNumber?: number;
 }
+
 
 // Specific item types for normalized DB stores
 export interface ChannelItem {
   id?: number; // Auto-incrementing primary key
   playlistDbId: string;
-  title: string;
+  title: string; // This is usually the full channel name including quality, e.g., "ESPN FHD"
   streamUrl: string;
   logoUrl?: string;
-  groupTitle?: string;
+  groupTitle?: string; // Normalized group title
   originalGroupTitle?: string;
   tvgId?: string;
-  tvgName?: string;
-  baseChannelName?: string;
-  quality?: string;
+  tvgName?: string; // Raw tvg-name
+  baseChannelName?: string; // e.g., "ESPN"
+  quality?: string; // e.g., "FHD"
 }
 
 export interface MovieItem {
   id?: number; // Auto-incrementing primary key
   playlistDbId: string;
-  title: string;
+  title: string; // Movie title, year might be part of it or in 'year' field
   streamUrl: string;
   logoUrl?: string;
-  groupTitle?: string;
+  groupTitle?: string; // Normalized, often used as genre
   originalGroupTitle?: string;
   tvgId?: string;
-  tvgName?: string;
-  genre?: string;
+  tvgName?: string; // Raw tvg-name
+  genre?: string; // Normalized genre
   year?: number;
 }
 
 export interface SeriesItem {
   id?: number; // Auto-incrementing primary key for the series itself
   playlistDbId: string;
-  title: string; // Series title
+  title: string; // Series title, e.g., "Breaking Bad"
   logoUrl?: string; // Series cover art
-  groupTitle?: string; // Genre for the series
+  groupTitle?: string; // Normalized, often used as genre
   originalGroupTitle?: string;
   tvgId?: string; // Series tvg-id (if available)
-  genre?: string;
+  genre?: string; // Normalized genre
   year?: number; // Year series started
-  // Potentially add other series-specific metadata here like plot, cast, etc.
 }
 
 export interface EpisodeItem {
@@ -111,12 +109,10 @@ export interface EpisodeItem {
   seasonNumber?: number;
   episodeNumber?: number;
   tvgId?: string; // Episode-specific tvg-id (if available)
-  // Potentially add other episode-specific metadata here like plot, airDate, etc.
 }
 
 
 // This interface is for what ContentCard expects
-// Will need review after DB normalization
 export interface ContentItemForCard {
   id: string; 
   title: string; 
@@ -124,15 +120,17 @@ export interface ContentItemForCard {
   type: 'movie' | 'series' | 'channel'; 
   genre?: string; 
   dataAiHint: string;
-  streamUrl?: string; 
+  streamUrl?: string; // For direct play movies or single-source channels
   
   // For aggregated channels
   qualities?: string[]; 
-  sourceCount?: number; 
+  sourceCount?: number; // Count of different playlists or quality variants for a channel
+  
   // For series cards
-  seriesId?: string; // This could be the SeriesItem.id from the DB
+  seriesId?: string; // This should be the SeriesItem.id from the DB
 }
 
+// Playlist Source Details
 export interface PlaylistSourceDetailsFile {
   type: 'file';
   fileName: string;
@@ -156,7 +154,7 @@ export interface PlaylistMetadata {
   sourceType: 'file' | 'url' | 'xtream';
   sourceDetails: PlaylistSourceDetails; 
   
-  itemCount?: number; // Total items initially parsed
+  itemCount?: number; // Total items initially parsed from M3U
   channelCount?: number;
   movieCount?: number;
   seriesCount?: number; // Count of unique series titles
@@ -191,20 +189,17 @@ export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_re
 
 // IndexedDB constants
 export const DB_NAME = 'CatCakeFlixDB'; 
-export const DB_VERSION = 4; // Incremented DB_VERSION for schema change
+export const DB_VERSION = 5; // Incremented for new index in series player
 export const PLAYLIST_METADATA_STORE = 'playlists';
 
-// New store names
 export const CHANNELS_STORE = 'channels';
 export const MOVIES_STORE = 'movies';
 export const SERIES_STORE = 'series';
 export const EPISODES_STORE = 'episodes';
 
-// Old store name (to be removed)
-export const LEGACY_PLAYLIST_ITEMS_STORE = 'playlistItems';
+export const LEGACY_PLAYLIST_ITEMS_STORE = 'playlistItems'; // Name of the old, single store
 
-
-export const FILE_PLAYLIST_ITEM_LIMIT = 50; 
+export const FILE_PLAYLIST_ITEM_LIMIT = 5000; 
 
 // Auto-refresh settings
 export const REFRESH_INTERVAL_MINUTES = 60; 

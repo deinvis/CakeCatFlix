@@ -124,7 +124,9 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); // Save initial metadata
+        // Save initial metadata to show processing status immediately
+        await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for file:", e));
+        await fetchPlaylists(); // Refresh list to show processing status
         
         const fileContent = await newPlaylistFile.text();
         itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
@@ -142,7 +144,8 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); // Save initial metadata
+        await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for URL:", e));
+        await fetchPlaylists();
 
         const response = await fetch(url); 
         if (!response.ok) {
@@ -167,14 +170,13 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        await updatePlaylistMetadata(metadataBase); // Save initial metadata
+        await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for Xtream:", e));
+        await fetchPlaylists();
         
-        // fetchXtreamPlaylistItems now returns PlaylistItem[] directly
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
-      // Now add items and update final metadata in one go using the DB function
-      // addPlaylistWithItems handles calculating counts and setting final status
+      metadataBase.name = nameToAdd; // Ensure name is set if derived
       await addPlaylistWithItems(metadataBase, itemsToAdd); 
       
       toast({
@@ -191,9 +193,11 @@ export function PlaylistManagement() {
         console.error(`Error adding ${type} playlist:`, error);
         const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
+            name: nameToAdd || `Falha ao adicionar ${type}`, // ensure name is set
             status: 'failed' as 'failed', 
-            statusMessage: error.message,
+            statusMessage: error.message || "Erro desconhecido",
             lastUpdatedAt: Date.now(),
+            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, // Reset counts on failure
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
 
@@ -299,7 +303,7 @@ export function PlaylistManagement() {
     }
   };
   
-  if (!isMounted || (isLoading && !playlists.length && loadingMessage === 'Carregando playlists...')) {
+  if (!isMounted || (isLoading && playlists.length === 0 && loadingMessage === 'Carregando playlists...')) {
     return (
       <Card className="shadow-lg border-border">
         <CardHeader>
@@ -406,7 +410,7 @@ export function PlaylistManagement() {
           </DialogContent>
         </Dialog>
 
-        {isLoading && !loadingMessage.startsWith('Carregando playlists...') && (
+        {isLoading && !loadingMessage.includes('Carregando playlists...') && (
           <div className="flex items-center justify-center text-primary my-4 py-2">
             <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -424,7 +428,7 @@ export function PlaylistManagement() {
               <ul className="space-y-3">
                 {playlists.map((playlist) => (
                   <li key={playlist.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
-                    <div className="flex-1 mb-2 sm:mb-0 mr-2">
+                    <div className="flex-1 mb-2 sm:mb-0 mr-2 min-w-0"> {/* Added min-w-0 here */}
                       <span className="font-medium text-foreground truncate block" title={playlist.name}>
                         {playlist.name}
                         <span className="text-xs text-muted-foreground ml-2">
@@ -446,7 +450,7 @@ export function PlaylistManagement() {
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
                         <span className="flex items-center"><Users className="h-3 w-3 mr-1 text-purple-500"/> {playlist.episodeCount ?? 0} (Episódios)</span>
                       </div>
-                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1">Erro: {playlist.statusMessage}</p>}
+                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1 break-all">Erro: {playlist.statusMessage}</p>}
                     </div>
                     <div className="space-x-1 flex-shrink-0">
                       <Dialog onOpenChange={(open) => { if(!open && !isLoading) setEditingPlaylist(null); }}>
