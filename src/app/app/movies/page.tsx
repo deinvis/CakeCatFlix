@@ -8,7 +8,7 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type MovieItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input'; // Import Input
+import { Input } from '@/components/ui/input';
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
@@ -28,34 +28,30 @@ interface GroupedMovies {
 }
 
 export default function MoviesPage() {
-  const [allGroupedMovieItems, setAllGroupedMovieItems] = useState<GroupedMovies[]>([]);
+  const [allRawMovieCardItems, setAllRawMovieCardItems] = useState<ContentItemForCard[]>([]);
+  const [allMovieGenres, setAllMovieGenres] = useState<string[]>([]);
   const [displayedGroupedMovieItems, setDisplayedGroupedMovieItems] = useState<GroupedMovies[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const fetchAndGroupMovies = useCallback(async (playlistId: string) => {
+  const fetchAllMovieData = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
     setIsLoading(true);
     try {
       const rawMovieItemsFromDB = await getPlaylistItems(playlistId, 'movie') as MovieItem[];
       const cardItems = rawMovieItemsFromDB.map(transformMovieItemToCardItem);
-      const genres = await getAllGenresForPlaylist(playlistId, 'movie');
+      setAllRawMovieCardItems(cardItems);
 
-      const groups: GroupedMovies[] = genres.map(genre => ({
-        genre: genre,
-        items: cardItems.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
-      })).filter(group => group.items.length > 0);
-
-      const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
-      setAllGroupedMovieItems(sortedGroups);
-      setDisplayedGroupedMovieItems(sortedGroups);
+      const genresFromDB = await getAllGenresForPlaylist(playlistId, 'movie');
+      setAllMovieGenres(genresFromDB.sort((a,b) => a.localeCompare(b)));
 
     } catch (error) {
-      console.error("Failed to fetch or group movie items:", error);
-      setAllGroupedMovieItems([]);
-      setDisplayedGroupedMovieItems([]);
+      console.error("Failed to fetch movie data:", error);
+      setAllRawMovieCardItems([]);
+      setAllMovieGenres([]);
     } finally {
       setIsLoading(false);
     }
@@ -72,11 +68,11 @@ export default function MoviesPage() {
           setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
           setActivePlaylistId(firstPlaylistId);
-          await fetchAndGroupMovies(firstPlaylistId);
+          await fetchAllMovieData(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setAllGroupedMovieItems([]);
-          setDisplayedGroupedMovieItems([]);
+          setAllRawMovieCardItems([]);
+          setAllMovieGenres([]);
           setIsLoading(false);
         }
       } catch (error) {
@@ -86,26 +82,36 @@ export default function MoviesPage() {
       }
     }
     initialize();
-  }, [fetchAndGroupMovies]);
+  }, [fetchAllMovieData]);
 
    useEffect(() => {
     if (isLoading) return;
-    if (!searchTerm) {
-      setDisplayedGroupedMovieItems(allGroupedMovieItems);
-      return;
+
+    let itemsToGroup = allRawMovieCardItems;
+    if (searchTerm) {
+      itemsToGroup = allRawMovieCardItems.filter(item =>
+        item.title.toLowerCase().includes(searchTerm.toLowerCase())
+      );
     }
-    const filtered = allGroupedMovieItems.filter(group =>
-      group.genre.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    setDisplayedGroupedMovieItems(filtered);
-  }, [searchTerm, allGroupedMovieItems, isLoading]);
+
+    const groups: GroupedMovies[] = allMovieGenres.map(genre => ({
+      genre: genre,
+      items: itemsToGroup.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
+    })).filter(group => group.items.length > 0);
+    
+    // If searching and groups result from filtered items, sort them. 
+    // Otherwise, genres are already sorted.
+    // No, sorting groups by genre name should always be consistent.
+    const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
+    setDisplayedGroupedMovieItems(sortedGroups);
+
+  }, [searchTerm, allRawMovieCardItems, allMovieGenres, isLoading]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
   };
 
-
-  if (hasPlaylistsConfigured === null || (isLoading && allGroupedMovieItems.length === 0)) {
+  if (hasPlaylistsConfigured === null || (isLoading && allRawMovieCardItems.length === 0 && allMovieGenres.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes." />
@@ -136,7 +142,7 @@ export default function MoviesPage() {
       <div className="mb-6">
         <Input
           type="search"
-          placeholder="Buscar por gêneros de filmes..."
+          placeholder="Buscar por filmes..." // Updated placeholder
           className="w-full sm:w-72"
           value={searchTerm}
           onChange={handleSearchChange}
@@ -154,7 +160,7 @@ export default function MoviesPage() {
             />
           ))
         ) : (
-           !isLoading && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum gênero de filme encontrado para "{searchTerm}".</p>
+           !isLoading && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado para "{searchTerm}".</p>
         ) || (
            !isLoading && <p className="text-muted-foreground text-center py-8">Nenhum filme encontrado nas suas playlists.</p>
         )
