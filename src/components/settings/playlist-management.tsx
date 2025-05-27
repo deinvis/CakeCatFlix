@@ -109,6 +109,11 @@ export function PlaylistManagement() {
       sourceDetails: {} as any, 
       createdAt: Date.now(),
       status: 'pending',
+      channelCount: 0,
+      movieCount: 0,
+      seriesCount: 0,
+      episodeCount: 0,
+      itemCount: 0,
     };
 
     try {
@@ -124,9 +129,8 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        // Save initial metadata to show processing status immediately
         await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for file:", e));
-        await fetchPlaylists(); // Refresh list to show processing status
+        await fetchPlaylists(); 
         
         const fileContent = await newPlaylistFile.text();
         itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
@@ -138,18 +142,21 @@ export function PlaylistManagement() {
           setIsLoading(false);
           return;
         }
-        const url = newPlaylistUrl.trim();
-        sourceDetails = { type: 'url', url: url };
-        nameToAdd = nameToAdd || `URL: ${url.substring(0,30)}${url.length > 30 ? '...' : ''}`;
+        const urlToFetch = newPlaylistUrl.trim();
+        sourceDetails = { type: 'url', url: urlToFetch };
+        nameToAdd = nameToAdd || `URL: ${urlToFetch.substring(0,30)}${urlToFetch.length > 30 ? '...' : ''}`;
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
         await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for URL:", e));
         await fetchPlaylists();
 
-        const response = await fetch(url); 
+        const proxyUrl = `/api/proxy?targetUrl=${encodeURIComponent(urlToFetch)}`;
+        const response = await fetch(proxyUrl); 
+        
         if (!response.ok) {
-          throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
+          const errorData = await response.json().catch(() => ({ error: "Falha ao buscar URL. Resposta não JSON."}));
+          throw new Error(errorData.error || `Falha ao buscar URL via proxy: ${response.status} ${response.statusText}.`);
         }
         const urlContent = await response.text();
         itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
@@ -176,12 +183,12 @@ export function PlaylistManagement() {
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
-      metadataBase.name = nameToAdd; // Ensure name is set if derived
+      metadataBase.name = nameToAdd; 
       await addPlaylistWithItems(metadataBase, itemsToAdd); 
       
       toast({
         title: `Playlist Adicionada (${type.toUpperCase()})`,
-        description: `"${nameToAdd}" foi processada. Verifique as contagens de itens abaixo.`,
+        description: `"${nameToAdd}" foi processada. Total de ${itemsToAdd.length} itens brutos, verifique as contagens detalhadas.`,
       });
 
       await fetchPlaylists(); 
@@ -193,17 +200,17 @@ export function PlaylistManagement() {
         console.error(`Error adding ${type} playlist:`, error);
         const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
-            name: nameToAdd || `Falha ao adicionar ${type}`, // ensure name is set
+            name: nameToAdd || `Falha ao adicionar ${type}`, 
             status: 'failed' as 'failed', 
             statusMessage: error.message || "Erro desconhecido",
             lastUpdatedAt: Date.now(),
-            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, // Reset counts on failure
+            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, 
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
 
         let description = error.message || "Ocorreu um erro desconhecido.";
         if (type === 'url' && (description.toLowerCase().includes('failed to fetch') || description.includes('falha ao buscar url'))) {
-            description = "Falha ao buscar a URL. Verifique a conexão com a internet, a URL fornecida e se o servidor permite acesso externo (CORS).";
+            description = "Falha ao buscar a URL. Verifique a conexão com a internet, a URL fornecida e se o servidor permite acesso externo (CORS) ou se a URL é válida.";
         }
         toast({ 
             title: `Erro ao Adicionar Playlist ${type.toUpperCase()}`, 
@@ -211,7 +218,7 @@ export function PlaylistManagement() {
             variant: "destructive",
             duration: 7000 
         });
-        await fetchPlaylists(); // Refresh list to show failed status
+        await fetchPlaylists(); 
     } finally {
         setIsLoading(false);
     }
@@ -378,7 +385,7 @@ export function PlaylistManagement() {
                     placeholder="https://exemplo.com/playlist.m3u" 
                     disabled={isLoading}
                   />
-                   <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens da URL. A URL deve permitir acesso direto (CORS habilitado).</p>
+                   <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens da URL. O conteúdo será buscado através de um proxy do servidor para evitar problemas de CORS.</p>
                 </div>
                  <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
@@ -428,13 +435,13 @@ export function PlaylistManagement() {
               <ul className="space-y-3">
                 {playlists.map((playlist) => (
                   <li key={playlist.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors duration-150">
-                    <div className="flex-1 mb-2 sm:mb-0 mr-2 min-w-0"> {/* Added min-w-0 here */}
+                    <div className="flex-1 mb-2 sm:mb-0 mr-2 min-w-0"> 
                       <span className="font-medium text-foreground truncate block" title={playlist.name}>
                         {playlist.name}
                         <span className="text-xs text-muted-foreground ml-2">
                           ({playlist.sourceType}
                           {playlist.sourceType === 'xtream' && (playlist.sourceDetails as PlaylistSourceDetailsXtream).username ? ` - ${(playlist.sourceDetails as PlaylistSourceDetailsXtream).username}` : ''})
-                           {playlist.status === 'failed' && <span className="text-destructive ml-1">(Falha)</span>}
+                           {playlist.status === 'failed' && <span className="text-destructive ml-1">(Falha: {playlist.statusMessage || 'Erro desconhecido'})</span>}
                            {playlist.status === 'processing' && <span className="text-amber-500 ml-1">(Processando...)</span>}
                            {playlist.status === 'completed' && <span className="text-green-500 ml-1">(Completo)</span>}
                         </span>
@@ -442,15 +449,15 @@ export function PlaylistManagement() {
                       <div className="text-xs text-muted-foreground flex items-center flex-wrap gap-x-2 gap-y-1 mt-1">
                         <span>Total Bruto: {playlist.itemCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1 text-sky-500"/> {playlist.channelCount ?? 0}</span>
+                        <span className="flex items-center"><Tv2 className="h-3 w-3 mr-1 text-sky-500"/> Canais: {playlist.channelCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Film className="h-3 w-3 mr-1 text-orange-500"/> {playlist.movieCount ?? 0}</span>
+                        <span className="flex items-center"><Film className="h-3 w-3 mr-1 text-orange-500"/> Filmes: {playlist.movieCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> {playlist.seriesCount ?? 0} (Séries)</span>
+                        <span className="flex items-center"><Clapperboard className="h-3 w-3 mr-1 text-teal-500"/> Séries: {playlist.seriesCount ?? 0}</span>
                         <Separator orientation="vertical" className="h-3 bg-border hidden sm:inline-block"/>
-                        <span className="flex items-center"><Users className="h-3 w-3 mr-1 text-purple-500"/> {playlist.episodeCount ?? 0} (Episódios)</span>
+                        <span className="flex items-center"><Users className="h-3 w-3 mr-1 text-purple-500"/> Episódios: {playlist.episodeCount ?? 0}</span>
                       </div>
-                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1 break-all">Erro: {playlist.statusMessage}</p>}
+                       {playlist.statusMessage && playlist.status === 'failed' && <p className="text-xs text-destructive mt-1 break-all hidden">Erro Detalhado: {playlist.statusMessage}</p>}
                     </div>
                     <div className="space-x-1 flex-shrink-0">
                       <Dialog onOpenChange={(open) => { if(!open && !isLoading) setEditingPlaylist(null); }}>
