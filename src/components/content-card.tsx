@@ -28,7 +28,7 @@ export function ContentCard({
 
   const defaultPlaceholder = `https://placehold.co/300x450.png`;
   // Determine the image source: original imageUrl, or placeholder if imageUrl is missing or an error occurred.
-  const imageSrc = imageError || !imageUrl ? defaultPlaceholder : imageUrl;
+  const imageSrc = imageError || !imageUrl || imageUrl.trim() === '' ? defaultPlaceholder : imageUrl;
   const finalDataAiHint = dataAiHint || `${type} ${title}`.substring(0, 50).toLowerCase();
 
   const handleClick = () => {
@@ -72,7 +72,7 @@ export function ContentCard({
                   setImageError(true);
                 }
               }}
-              unoptimized={imageError || !imageUrl} // If using placeholder, no need to optimize it
+              unoptimized={imageError || imageSrc === defaultPlaceholder} // If using placeholder, or original caused error, no need to optimize it
             />
             <Badge variant="default" className="absolute top-2 left-2 text-xs shadow-md">
               <TypeIcon className="h-3 w-3 mr-1" />
