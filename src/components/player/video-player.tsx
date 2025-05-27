@@ -4,15 +4,15 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import Hls from 'hls.js';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, WifiOff } from 'lucide-react';
+import { AlertTriangle, WifiOff } from 'lucide-react'; // Added WifiOff for no stream
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 
 interface VideoPlayerProps {
   streamUrl: string | null;
-  itemId?: string | number;
-  itemType?: 'movie' | 'series' | 'channel';
-  itemTitle?: string;
+  itemId?: string | number; // For potential future use (e.g., saving playback progress)
+  itemType?: 'movie' | 'series' | 'channel'; // For potential future use
+  itemTitle?: string; // For logging and display purposes
   posterUrl?: string;
 }
 
@@ -21,8 +21,8 @@ const TEST_STREAMS = {
   NONE: 'none',
   HLS_BIG_BUCK_BUNNY: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
   MP4_BIG_BUCK_BUNNY: 'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4',
-  // Add more test streams if needed
 };
+
 
 export function VideoPlayer({ 
   streamUrl: propStreamUrl, 
@@ -34,13 +34,14 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
   const [currentTestStream, setCurrentTestStream] = useState<string>(TEST_STREAMS.NONE);
 
   const streamUrlToPlay = currentTestStream === TEST_STREAMS.NONE ? propStreamUrl : currentTestStream;
   const currentItemTitle = currentTestStream === TEST_STREAMS.NONE ? itemTitle : 
                            currentTestStream === TEST_STREAMS.HLS_BIG_BUCK_BUNNY ? "Test HLS (Big Buck Bunny)" :
                            currentTestStream === TEST_STREAMS.MP4_BIG_BUCK_BUNNY ? "Test MP4 (Big Buck Bunny)" : "Test Stream";
+
 
   const logMediaError = useCallback((context: string, error: MediaError | null, currentStreamUrlForLog?: string) => {
     let userFriendlyMessage = "Ocorreu um erro desconhecido ao tentar reproduzir o vídeo.";
@@ -51,33 +52,33 @@ export function VideoPlayer({
       if (error.message) details += `, Message: ${error.message}`;
       
       switch (error.code) {
-        case MediaError.MEDIA_ERR_ABORTED:
+        case MediaError.MEDIA_ERR_ABORTED: // code 1
           details += ' (A busca pelo recurso de mídia foi abortada pelo usuário.)';
           userFriendlyMessage = "A reprodução foi interrompida.";
           break;
-        case MediaError.MEDIA_ERR_NETWORK:
+        case MediaError.MEDIA_ERR_NETWORK: // code 2
           details += ' (Ocorreu um erro de rede ao buscar o recurso de mídia.)';
           userFriendlyMessage = "Erro de rede ao carregar o vídeo. Verifique sua conexão com a internet.";
           break;
-        case MediaError.MEDIA_ERR_DECODE:
+        case MediaError.MEDIA_ERR_DECODE: // code 3
           details += ' (Ocorreu um erro ao decodificar o recurso de mídia.)';
           userFriendlyMessage = "Erro ao decodificar o vídeo. O arquivo pode estar corrompido ou em um formato não suportado.";
           break;
-        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: // code 4
           details += ' (O recurso de mídia especificado não era adequado ou o formato não é suportado.)';
-          userFriendlyMessage = `Formato de vídeo não suportado ou fonte inválida. Verifique a URL (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,50)+'...' : 'N/A'}), e se o servidor permite acesso (CORS).`;
+          userFriendlyMessage = `Formato de vídeo não suportado ou fonte inválida. Verifique o console do navegador (F12) para possíveis erros de CORS ou rede. URL: ${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}`;
           if (currentStreamUrlForLog && currentStreamUrlForLog.toLowerCase().endsWith('.ts')) {
             userFriendlyMessage += " Streams .ts podem ter compatibilidade limitada.";
           }
           break;
         default:
           details += ` (Código de erro desconhecido: ${error.code}).`;
-          userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,50)+'...' : 'N/A'}). Verifique a URL, sua conexão, e se o servidor permite acesso (CORS). (Código: ${error.code || 'N/A'})`;
+          userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador para detalhes. (Código: ${error.code || 'N/A'})`;
       }
       consoleLogFn(`${context}: ${details}`, error, "URL:", currentStreamUrlForLog);
     } else {
       const suspectedCorsMessage = currentStreamUrlForLog?.toLowerCase().endsWith('.mp4') ? " Isso frequentemente ocorre devido a restrições de CORS no servidor do vídeo." : "";
-      userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,50)+'...' : 'N/A'}). Verifique a URL, sua conexão, e se o servidor permite acesso (CORS).${suspectedCorsMessage}`;
+      userFriendlyMessage = `Ocorreu um erro ao carregar o vídeo (${currentStreamUrlForLog ? currentStreamUrlForLog.slice(0,70)+'...' : 'N/A'}). Verifique a URL, sua conexão e o console do navegador (F12) para detalhes (CORS, rede).${suspectedCorsMessage}`;
       consoleLogFn(`${context}: Erro não especificado ou video.error nulo. URL: ${currentStreamUrlForLog}`);
     }
     setPlayerError(userFriendlyMessage);
@@ -91,17 +92,18 @@ export function VideoPlayer({
       .then(() => {
         console.log(`VideoPlayer: Play promise resolvido para ${sourceDescription}`);
         setPlayerError(null);
-        setIsLoading(false);
+        // setIsLoading(false); // isLoading is handled by 'playing' or 'error' events now
       })
       .catch(playError => {
         if (playError.name === 'NotAllowedError' || playError.name === 'NotSupportedError') {
           console.warn(`VideoPlayer: Play promise rejeitado (autoplay bloqueado ou não suportado) para ${sourceDescription}:`, playError.name, playError.message);
-          setIsLoading(false); 
+          // Do not set isLoading to false here if autoplay is blocked, 'canplay' or 'playing' should handle it.
           setPlayerError("A reprodução automática foi bloqueada. Clique no play para iniciar.");
         } else {
           console.error(`VideoPlayer: Play promise rejeitado com erro inesperado para ${sourceDescription}:`, playError);
           logMediaError(`VideoPlayer Erro no play() para ${currentItemTitle} (${streamUrlToPlay})`, playError as any, streamUrlToPlay);
         }
+         setIsLoading(false); // Ensure loading is stopped if play fails for other reasons
       });
   }, [streamUrlToPlay, currentItemTitle, logMediaError, setIsLoading, setPlayerError]);
 
@@ -109,7 +111,7 @@ export function VideoPlayer({
     const onLoadedMetadata = () => {
       console.log(`VideoPlayer (${playerType}): Metadados carregados para`, streamUrlToPlay);
       setPlayerError(null); 
-      setIsLoading(false); 
+      // setIsLoading(false); // isLoading is handled by 'playing' or 'canplay'
       // TODO: Restore playback progress logic when store is implemented
       tryPlay(videoElement, `${playerType} stream (onloadedmetadata)`);
     };
@@ -139,6 +141,7 @@ export function VideoPlayer({
     videoElement.addEventListener('playing', onPlaying);
     videoElement.addEventListener('waiting', onWaiting);
     videoElement.addEventListener('canplay', onCanPlay);
+    // videoElement.addEventListener('timeupdate', handleTimeUpdate); // Placeholder for progress
 
     return () => {
       videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -146,8 +149,9 @@ export function VideoPlayer({
       videoElement.removeEventListener('playing', onPlaying);
       videoElement.removeEventListener('waiting', onWaiting);
       videoElement.removeEventListener('canplay', onCanPlay);
+      // videoElement.removeEventListener('timeupdate', handleTimeUpdate);
     };
-  }, [streamUrlToPlay, currentItemTitle, itemType, itemId, tryPlay, logMediaError, setIsLoading, setPlayerError]);
+  }, [streamUrlToPlay, currentItemTitle, tryPlay, logMediaError, setIsLoading, setPlayerError]);
 
   useEffect(() => {
     console.log(`VideoPlayer: Configurando para item: "${currentItemTitle}", URL: "${streamUrlToPlay}", ID: ${itemId}`);
@@ -192,7 +196,7 @@ export function VideoPlayer({
       if (Hls.isSupported()) {
         console.log("VideoPlayer: HLS.js é suportado.");
         const hls = new Hls({
-            // debug: true, 
+            // debug: true, // Enable for verbose HLS.js logs
         });
         hlsRef.current = hls;
         
@@ -213,6 +217,7 @@ export function VideoPlayer({
                 } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
                      userFriendlyHlsError = "Erro ao carregar segmento do vídeo HLS. Conexão instável ou stream incompleto."
                 }
+                // if (hlsRef.current) hlsRef.current.startLoad(); // Can cause error loops
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 userFriendlyHlsError = `Erro de mídia HLS: ${data.details}.`;
@@ -221,6 +226,7 @@ export function VideoPlayer({
                 } else if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
                     userFriendlyHlsError = "Reprodução parada devido a problema no buffer do HLS."
                 }
+                // if (hlsRef.current) hlsRef.current.recoverMediaError(); // Can cause error loops
                 break;
               default:
                 userFriendlyHlsError = `Erro HLS: ${data.details || 'Desconhecido'}.`;
@@ -330,5 +336,3 @@ export function VideoPlayer({
     </div>
   );
 }
-
-    
