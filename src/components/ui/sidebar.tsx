@@ -1,6 +1,15 @@
+
 "use client"
 
 import * as React from "react"
+// Keep the file but it will be unused for now.
+// If you ever want to revert or use sidebar for other purposes, it's here.
+// For this change, its content is not directly modified but it's not used by AppLayout.
+
+// Original content of sidebar.tsx remains here, but it is not actively used by the main layout.
+// To fully remove it, you would delete this file and remove it from components.json and any other imports.
+// For now, just leaving it.
+
 import { Slot } from "@radix-ui/react-slot"
 import { VariantProps, cva } from "class-variance-authority"
 import { PanelLeft } from "lucide-react"
