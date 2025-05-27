@@ -1,5 +1,4 @@
 
-
 import {
   DB_NAME,
   DB_VERSION,
@@ -11,7 +10,7 @@ import {
   LEGACY_PLAYLIST_ITEMS_STORE
 } from '@/lib/constants';
 import type {
-  PlaylistItem, // Generic item from parser
+  PlaylistItem,
   PlaylistMetadata,
   ChannelItem,
   MovieItem,
@@ -36,92 +35,67 @@ function getDb(): Promise<IDBDatabase> {
         console.log(`Upgrading DB from version ${oldVersion} to ${DB_VERSION}`);
 
         if (!db.objectStoreNames.contains(PLAYLIST_METADATA_STORE)) {
-          console.log(`Creating store ${PLAYLIST_METADATA_STORE}`);
+          console.log(`DB: Creating store ${PLAYLIST_METADATA_STORE}`);
           db.createObjectStore(PLAYLIST_METADATA_STORE, { keyPath: 'id' });
         }
 
         if (oldVersion < 4 && db.objectStoreNames.contains(LEGACY_PLAYLIST_ITEMS_STORE)) {
-          console.log(`Upgrading DB: Deleting old store ${LEGACY_PLAYLIST_ITEMS_STORE}`);
+          console.log(`DB: Deleting old store ${LEGACY_PLAYLIST_ITEMS_STORE}`);
           db.deleteObjectStore(LEGACY_PLAYLIST_ITEMS_STORE);
         }
 
-        if (!db.objectStoreNames.contains(CHANNELS_STORE)) {
-          console.log(`Creating store ${CHANNELS_STORE}`);
-          const channelStore = db.createObjectStore(CHANNELS_STORE, { autoIncrement: true, keyPath: 'id' });
-          channelStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
-          channelStore.createIndex('baseChannelName_idx', 'baseChannelName', { unique: false });
-          channelStore.createIndex('playlist_baseChannelName_idx', ['playlistDbId', 'baseChannelName'], { unique: false });
-          channelStore.createIndex('groupTitle_idx', 'groupTitle', { unique: false });
-          channelStore.createIndex('playlist_groupTitle_idx', ['playlistDbId', 'groupTitle'], { unique: false });
-
-        } else if (oldVersion < 4) {
+        const ensureStoreAndIndices = (storeName: string, keyPath: string, indices: { name: string, keyPath: string | string[], options?: IDBIndexParameters }[]) => {
+          let store: IDBObjectStore;
+          if (!db.objectStoreNames.contains(storeName)) {
+            console.log(`DB: Creating store ${storeName}`);
+            store = db.createObjectStore(storeName, { autoIncrement: true, keyPath: keyPath });
+          } else {
             const transaction = (event.target as IDBOpenDBRequest).transaction;
-            if (transaction) {
-                const channelStore = transaction.objectStore(CHANNELS_STORE);
-                if (!channelStore.indexNames.contains('playlist_groupTitle_idx')) {
-                    console.log(`Upgrading DB: Adding index playlist_groupTitle_idx to ${CHANNELS_STORE}`);
-                    channelStore.createIndex('playlist_groupTitle_idx', ['playlistDbId', 'groupTitle'], { unique: false });
-                }
+            if (!transaction) {
+                console.error(`DB: Transaction not available for upgrading ${storeName}`);
+                return;
             }
-        }
-
-
-        if (!db.objectStoreNames.contains(MOVIES_STORE)) {
-          console.log(`Creating store ${MOVIES_STORE}`);
-          const movieStore = db.createObjectStore(MOVIES_STORE, { autoIncrement: true, keyPath: 'id' });
-          movieStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
-          movieStore.createIndex('genre_idx', 'genre', { unique: false });
-          movieStore.createIndex('year_idx', 'year', { unique: false });
-          movieStore.createIndex('playlist_genre_idx', ['playlistDbId', 'genre'], { unique: false });
-          movieStore.createIndex('title_idx', 'title', {unique: false});
-        } else if (oldVersion < 3) {
-            const transaction = (event.target as IDBOpenDBRequest).transaction;
-             if (transaction) {
-                const movieStore = transaction.objectStore(MOVIES_STORE);
-                if (!movieStore.indexNames.contains('year_idx')) {
-                    console.log(`Upgrading DB: Adding index year_idx to ${MOVIES_STORE}`);
-                    movieStore.createIndex('year_idx', 'year', { unique: false });
-                }
+            store = transaction.objectStore(storeName);
+          }
+          indices.forEach(indexInfo => {
+            if (!store.indexNames.contains(indexInfo.name)) {
+              console.log(`DB: Creating index ${indexInfo.name} on ${storeName}`);
+              store.createIndex(indexInfo.name, indexInfo.keyPath, indexInfo.options);
             }
-        } else if (oldVersion < 4) { // For version 4, we might add playlist_genre_idx if not present
-             const transaction = (event.target as IDBOpenDBRequest).transaction;
-             if (transaction) {
-                const movieStore = transaction.objectStore(MOVIES_STORE);
-                if (!movieStore.indexNames.contains('playlist_genre_idx')) {
-                     console.log(`Upgrading DB: Adding index playlist_genre_idx to ${MOVIES_STORE}`);
-                     movieStore.createIndex('playlist_genre_idx', ['playlistDbId', 'genre'], { unique: false });
-                }
-             }
-        }
+          });
+        };
+        
+        ensureStoreAndIndices(CHANNELS_STORE, 'id', [
+          { name: 'playlistDbId_idx', keyPath: 'playlistDbId' },
+          { name: 'baseChannelName_idx', keyPath: 'baseChannelName' },
+          { name: 'playlist_baseChannelName_idx', keyPath: ['playlistDbId', 'baseChannelName'] },
+          { name: 'groupTitle_idx', keyPath: 'groupTitle' },
+          { name: 'playlist_groupTitle_idx', keyPath: ['playlistDbId', 'groupTitle'] },
+        ]);
 
+        ensureStoreAndIndices(MOVIES_STORE, 'id', [
+          { name: 'playlistDbId_idx', keyPath: 'playlistDbId' },
+          { name: 'genre_idx', keyPath: 'genre' },
+          { name: 'year_idx', keyPath: 'year' },
+          { name: 'title_idx', keyPath: 'title'},
+          { name: 'playlist_genre_idx', keyPath: ['playlistDbId', 'genre'] },
+          { name: 'playlist_itemType_genre_idx', keyPath: ['playlistDbId', 'itemType', 'genre'], options: { multiEntry: true } },
+        ]);
+        
+        ensureStoreAndIndices(SERIES_STORE, 'id', [
+          { name: 'playlistDbId_idx', keyPath: 'playlistDbId' },
+          { name: 'title_idx', keyPath: 'title' },
+          { name: 'genre_idx', keyPath: 'genre' },
+          { name: 'playlist_title_idx', keyPath: ['playlistDbId', 'title'], options: { unique: true } },
+          { name: 'playlist_genre_idx', keyPath: ['playlistDbId', 'genre'] },
+        ]);
 
-        if (!db.objectStoreNames.contains(SERIES_STORE)) {
-          console.log(`Creating store ${SERIES_STORE}`);
-          const seriesStore = db.createObjectStore(SERIES_STORE, { autoIncrement: true, keyPath: 'id' });
-          seriesStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
-          seriesStore.createIndex('title_idx', 'title', { unique: false });
-          seriesStore.createIndex('genre_idx', 'genre', { unique: false });
-          seriesStore.createIndex('playlist_title_idx', ['playlistDbId', 'title'], { unique: true });
-          seriesStore.createIndex('playlist_genre_idx', ['playlistDbId', 'genre'], { unique: false });
-        } else if (oldVersion < 4) {
-            const transaction = (event.target as IDBOpenDBRequest).transaction;
-            if (transaction) {
-                const seriesStore = transaction.objectStore(SERIES_STORE);
-                 if (!seriesStore.indexNames.contains('playlist_genre_idx')) {
-                     console.log(`Upgrading DB: Adding index playlist_genre_idx to ${SERIES_STORE}`);
-                     seriesStore.createIndex('playlist_genre_idx', ['playlistDbId', 'genre'], { unique: false });
-                 }
-            }
-        }
-
-        if (!db.objectStoreNames.contains(EPISODES_STORE)) {
-          console.log(`Creating store ${EPISODES_STORE}`);
-          const episodeStore = db.createObjectStore(EPISODES_STORE, { autoIncrement: true, keyPath: 'id' });
-          episodeStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
-          episodeStore.createIndex('seriesDbId_idx', 'seriesDbId', { unique: false });
-          episodeStore.createIndex('playlist_series_season_episode_idx', ['playlistDbId', 'seriesDbId', 'seasonNumber', 'episodeNumber'], { unique: false });
-          episodeStore.createIndex('title_idx', 'title', {unique: false});
-        }
+        ensureStoreAndIndices(EPISODES_STORE, 'id', [
+          { name: 'playlistDbId_idx', keyPath: 'playlistDbId' },
+          { name: 'seriesDbId_idx', keyPath: 'seriesDbId' },
+          { name: 'title_idx', keyPath: 'title'},
+          { name: 'playlist_series_season_episode_idx', keyPath: ['playlistDbId', 'seriesDbId', 'seasonNumber', 'episodeNumber'] },
+        ]);
       };
 
       request.onsuccess = (event) => {
@@ -169,28 +143,13 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
         console.error("Transaction error in addPlaylistWithItems:", transaction.error);
         reject(transaction.error || new Error("Transaction failed."));
     };
+    
+    // This oncomplete will be called AFTER all items are processed and metadata is updated
     transaction.oncomplete = () => {
-        metadata.itemCount = items.length;
-        metadata.channelCount = channelCount;
-        metadata.movieCount = movieCount;
-        metadata.seriesCount = uniqueSeriesInPlaylist.size;
-        metadata.episodeCount = episodeCount;
-        metadata.status = 'completed';
-        metadata.lastUpdatedAt = Date.now();
-        metadata.lastSuccessfulUpdateAt = Date.now();
-
-        const metaRequest = metadataStore.put(metadata);
-        metaRequest.onerror = () => {
-            // This error won't be caught by transaction.onerror if transaction already completed.
-            console.error("Error updating playlist metadata after items processed:", metaRequest.error);
-             // Attempt to reject the main promise, though transaction is complete.
-            reject(metaRequest.error || new Error("Failed to update playlist metadata."));
-        };
-        // If metaRequest succeeds, it implies overall success for this phase.
-        metaRequest.onsuccess = () => resolve();
+      resolve();
     };
-
-    // Pre-process to identify all unique series and prepare them for batch addition
+    
+    // Pre-process to identify all unique series
     for (const item of items) {
         if (item.itemType === 'series_episode' && item.seriesTitle) {
             if (!uniqueSeriesInPlaylist.has(item.seriesTitle)) {
@@ -200,13 +159,12 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
                     logoUrl: item.logoUrl,
                     groupTitle: item.groupTitle,
                     originalGroupTitle: item.originalGroupTitle,
-                    tvgId: item.tvgId, // This might be episode's tvgId, consider if series-level tvgId exists
+                    tvgId: item.tvgId, 
                     genre: item.genre,
                     year: item.year,
                 };
                 uniqueSeriesInPlaylist.set(item.seriesTitle, { item: seriesEntry });
             } else {
-                // Update existing series entry if new info is better (e.g., logo from S01E01)
                 const existingSeriesData = uniqueSeriesInPlaylist.get(item.seriesTitle)!;
                 if (item.logoUrl && (!existingSeriesData.item.logoUrl || (item.seasonNumber === 1 && item.episodeNumber === 1))) {
                     existingSeriesData.item.logoUrl = item.logoUrl;
@@ -214,7 +172,6 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
                 if (item.genre && !existingSeriesData.item.genre) existingSeriesData.item.genre = item.genre;
                 if (item.year && !existingSeriesData.item.year) existingSeriesData.item.year = item.year;
                 if (item.groupTitle && !existingSeriesData.item.groupTitle) existingSeriesData.item.groupTitle = item.groupTitle;
-
             }
         }
     }
@@ -235,79 +192,86 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
         await Promise.all(seriesAddPromises);
     } catch (error) {
         console.error("Error batch adding series items:", error);
-        if (transaction.error === null) transaction.abort(); // Abort if not already
+        if (transaction.error === null && transaction.idbRequest && transaction.idbRequest.readyState !== 'done') transaction.abort();
         reject(error);
         return;
     }
 
     // Now add individual items
-    const itemAddPromises = items.map(item => new Promise<void>((res, rej) => {
+    const itemAddOperations: Promise<void>[] = items.map(item => new Promise<void>((resItem, rejItem) => {
         item.playlistDbId = metadata.id;
         let request: IDBRequest;
 
         if (item.itemType === 'channel') {
-            const channel: ChannelItem = { /* ... map item to ChannelItem ... */
+            const channel: ChannelItem = { 
                 playlistDbId: item.playlistDbId,
-                title: item.title,
-                streamUrl: item.streamUrl,
-                logoUrl: item.logoUrl,
-                groupTitle: item.groupTitle,
-                originalGroupTitle: item.originalGroupTitle,
-                tvgId: item.tvgId,
-                tvgName: item.tvgName,
-                baseChannelName: item.baseChannelName,
-                quality: item.quality,
+                title: item.title, streamUrl: item.streamUrl, logoUrl: item.logoUrl,
+                groupTitle: item.groupTitle, originalGroupTitle: item.originalGroupTitle,
+                tvgId: item.tvgId, tvgName: item.tvgName,
+                baseChannelName: item.baseChannelName, quality: item.quality,
             };
             request = channelStore.add(channel);
-            request.onsuccess = () => { channelCount++; res(); };
+            request.onsuccess = () => { channelCount++; resItem(); };
         } else if (item.itemType === 'movie') {
-            const movie: MovieItem = { /* ... map item to MovieItem ... */
+            const movie: MovieItem = {
                 playlistDbId: item.playlistDbId,
-                title: item.title,
-                streamUrl: item.streamUrl,
-                logoUrl: item.logoUrl,
-                groupTitle: item.groupTitle,
-                originalGroupTitle: item.originalGroupTitle,
-                tvgId: item.tvgId,
-                tvgName: item.tvgName,
-                genre: item.genre,
-                year: item.year,
+                title: item.title, streamUrl: item.streamUrl, logoUrl: item.logoUrl,
+                groupTitle: item.groupTitle, originalGroupTitle: item.originalGroupTitle,
+                tvgId: item.tvgId, tvgName: item.tvgName,
+                genre: item.genre, year: item.year,
             };
             request = movieStore.add(movie);
-            request.onsuccess = () => { movieCount++; res(); };
+            request.onsuccess = () => { movieCount++; resItem(); };
         } else if (item.itemType === 'series_episode') {
-            if (!item.seriesTitle) { console.warn("Series episode missing seriesTitle, skipping:", item); res(); return; }
+            if (!item.seriesTitle) { console.warn("Series episode missing seriesTitle, skipping:", item); resItem(); return; }
             const seriesData = uniqueSeriesInPlaylist.get(item.seriesTitle);
             if (!seriesData || seriesData.id === undefined) {
                 console.error(`Series ID not found for "${item.seriesTitle}", skipping episode.`);
-                res(); return;
+                resItem(); return;
             }
-            const episode: EpisodeItem = { /* ... map item to EpisodeItem ... */
+            const episode: EpisodeItem = {
                 playlistDbId: item.playlistDbId,
                 seriesDbId: seriesData.id,
-                title: item.title,
-                streamUrl: item.streamUrl,
-                logoUrl: item.logoUrl,
-                seasonNumber: item.seasonNumber,
-                episodeNumber: item.episodeNumber,
+                title: item.title, streamUrl: item.streamUrl, logoUrl: item.logoUrl,
+                seasonNumber: item.seasonNumber, episodeNumber: item.episodeNumber,
                 tvgId: item.tvgId,
             };
             request = episodeStore.add(episode);
-            request.onsuccess = () => { episodeCount++; res(); };
+            request.onsuccess = () => { episodeCount++; resItem(); };
         } else {
-            res(); // Unknown item type
+            resItem(); 
             return;
         }
-        request.onerror = () => rej(request.error);
+        request.onerror = () => rejItem(request.error);
     }));
-
+    
     try {
-        await Promise.all(itemAddPromises);
-        // Transaction will complete via oncomplete handler
+      await Promise.all(itemAddOperations);
+      
+      // All items added, now update metadata
+      metadata.itemCount = items.length;
+      metadata.channelCount = channelCount;
+      metadata.movieCount = movieCount;
+      metadata.seriesCount = uniqueSeriesInPlaylist.size;
+      metadata.episodeCount = episodeCount;
+      metadata.status = 'completed';
+      metadata.lastUpdatedAt = Date.now();
+      metadata.lastSuccessfulUpdateAt = Date.now();
+
+      const metaRequest = metadataStore.put(metadata);
+      metaRequest.onerror = () => {
+          console.error("Error updating playlist metadata after items processed:", metaRequest.error);
+          // Don't reject here as the transaction might be completing. The error is logged.
+          // If transaction aborts, the outer onabort will catch it.
+      };
+      // The transaction will auto-complete. If metaRequest fails, it might still commit prior item additions.
+      // For full atomicity, this put should be part of the item adding loop, or handled differently.
+      // However, for now, this structure is common.
+
     } catch (error) {
         console.error("Error batch adding channel/movie/episode items:", error);
-         if (transaction.error === null) transaction.abort();
-        reject(error);
+        if (transaction.error === null && transaction.idbRequest && transaction.idbRequest.readyState !== 'done') transaction.abort();
+        reject(error); // This reject will be caught by the outer Promise chain if transaction hasn't aborted.
     }
   });
 }
@@ -403,33 +367,32 @@ export async function deletePlaylistAndItems(playlistId: string): Promise<void> 
 
 export async function getPlaylistItems(
   playlistDbId: string,
-  itemType?: 'channel' | 'movie' | 'series' | 'episode', // Added 'series' and 'episode'
+  itemType: 'channel' | 'movie' | 'series' | 'episode',
   limit?: number,
   offset: number = 0
-): Promise<any[]> { // Return type is any[] as it can be ChannelItem[], MovieItem[], etc.
+): Promise<any[]> { 
   const db = await getDb();
   let storeName: string;
 
   switch(itemType) {
     case 'channel': storeName = CHANNELS_STORE; break;
     case 'movie': storeName = MOVIES_STORE; break;
-    case 'series': storeName = SERIES_STORE; break; // To fetch unique series items
-    case 'episode': storeName = EPISODES_STORE; break; // To fetch episodes, likely filtered by seriesDbId later
+    case 'series': storeName = SERIES_STORE; break; 
+    case 'episode': storeName = EPISODES_STORE; break; 
     default:
-      console.warn(`getPlaylistItems called with invalid or no itemType: ${itemType}. Returning empty array.`);
+      console.warn(`getPlaylistItems called with invalid itemType: ${itemType}. Returning empty array.`);
       return Promise.resolve([]);
   }
 
   return new Promise((resolve, reject) => {
       const transaction = db.transaction(storeName, 'readonly');
       const store = transaction.objectStore(storeName);
-      const index = store.index('playlistDbId_idx'); // Assumes all stores have this index
+      const index = store.index('playlistDbId_idx'); 
       const range = IDBKeyRange.only(playlistDbId);
 
       const items: any[] = [];
-      let advancedOnce = false; // To ensure advance is called only once.
-      let count = 0;
-
+      let advancedOnce = false; 
+      
       const cursorRequest = index.openCursor(range);
 
       cursorRequest.onsuccess = (event) => {
@@ -441,11 +404,9 @@ export async function getPlaylistItems(
                       cursor.advance(offset);
                   } catch (e) {
                       console.warn("Failed to advance cursor by offset (offset might be too large):", e);
-                      resolve(items); // Resolve with items collected so far, or empty if none before error.
+                      resolve(items);
                       return;
                   }
-                  // After calling advance, we must wait for the next 'onsuccess' to get the new cursor position.
-                  // So, we simply return here.
                   return;
               }
 
@@ -456,7 +417,6 @@ export async function getPlaylistItems(
               items.push(cursor.value);
               cursor.continue();
           } else {
-              // Cursor is null, meaning no more items or advance went past the end.
               resolve(items);
           }
       };
@@ -470,28 +430,27 @@ export async function getPlaylistItems(
 export async function getPlaylistItemsByGroup(
   playlistDbId: string,
   groupTitle: string,
-  itemType: 'movie' | 'series' | 'channel', // itemType is now mandatory
+  itemType: 'movie' | 'series' | 'channel',
   limit?: number,
   offset: number = 0
 ): Promise<any[]> {
     const db = await getDb();
     let storeName: string;
     let indexName: string;
-    // The key for the index will be a compound key [playlistDbId, groupTitle/genre]
     let keyRangeValue: IDBValidKey | IDBKeyRange = IDBKeyRange.only([playlistDbId, groupTitle]);
 
     switch(itemType) {
         case 'movie':
             storeName = MOVIES_STORE;
-            indexName = 'playlist_genre_idx'; // Assumes 'genre' field in MovieItem stores the groupTitle
+            indexName = 'playlist_genre_idx'; 
             break;
         case 'series':
             storeName = SERIES_STORE;
-            indexName = 'playlist_genre_idx'; // Assumes 'genre' field in SeriesItem stores the groupTitle
+            indexName = 'playlist_genre_idx'; 
             break;
         case 'channel':
             storeName = CHANNELS_STORE;
-            indexName = 'playlist_groupTitle_idx'; // Uses 'groupTitle' field in ChannelItem
+            indexName = 'playlist_groupTitle_idx'; 
             break;
         default:
             return Promise.reject(new Error("Invalid itemType for getPlaylistItemsByGroup. Must be 'movie', 'series', or 'channel'."));
@@ -616,15 +575,15 @@ export async function getAllGenresForPlaylist(
   switch(itemType) {
     case 'movie':
       storeName = MOVIES_STORE;
-      fieldToCollect = 'genre'; // MovieItem has a 'genre' field
+      fieldToCollect = 'genre'; 
       break;
     case 'series':
       storeName = SERIES_STORE;
-      fieldToCollect = 'genre'; // SeriesItem has a 'genre' field
+      fieldToCollect = 'genre'; 
       break;
     case 'channel':
       storeName = CHANNELS_STORE;
-      fieldToCollect = 'groupTitle'; // ChannelItem uses 'groupTitle' as its category
+      fieldToCollect = 'groupTitle'; 
       break;
     default:
       return Promise.resolve([]);
@@ -684,15 +643,16 @@ export async function getMovieItemById(id: number): Promise<MovieItem | undefine
 }
 
 // Fetches a single SeriesItem by its database ID
-export async function getSeriesItemById(id: number | string): Promise<SeriesItem | undefined> {
-    // The ID for series might be its auto-incremented primary key (number) or its tvgId/title (string) if used as a key
+export async function getSeriesItemById(id: string | number): Promise<SeriesItem | undefined> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(SERIES_STORE, 'readonly');
         const store = transaction.objectStore(SERIES_STORE);
-        // If id is a string, it might be a tvgId or title, requiring an index lookup.
-        // For now, assuming id is the primary key (number)
-        const request = store.get(typeof id === 'string' ? parseInt(id) : id);
+        const key = typeof id === 'string' ? parseInt(id, 10) : id;
+        if (isNaN(key)) {
+            return reject(new Error("Invalid series ID format for DB lookup."));
+        }
+        const request = store.get(key);
         request.onsuccess = () => resolve(request.result as SeriesItem | undefined);
         request.onerror = () => reject(request.error);
     });
@@ -705,15 +665,8 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
         const transaction = db.transaction(EPISODES_STORE, 'readonly');
         const store = transaction.objectStore(EPISODES_STORE);
         const index = store.index('playlist_series_season_episode_idx');
-        // Query for [playlistDbId, seriesDbId] - lower bound
-        // And [playlistDbId, seriesDbId, highest_possible_season, highest_possible_episode] - upper bound
-        // A simpler approach for now if the index is exactly ['playlistDbId', 'seriesDbId', ...]
-        // is to use a range that covers all episodes for that series in that playlist.
-        // For an index on ['playlistDbId', 'seriesDbId', 'seasonNumber', 'episodeNumber'],
-        // we can use IDBKeyRange.bound([playlistDbId, seriesDbId], [playlistDbId, seriesDbId, [], []], false, false)
-        // The [] acts as "positive infinity" for season/episode numbers in this context.
         const lowerBound = [playlistDbId, seriesDbId];
-        const upperBound = [playlistDbId, seriesDbId, [], []]; // [] is like +Infinity for IndexedDB compound keys
+        const upperBound = [playlistDbId, seriesDbId, [], []]; 
 
         const range = IDBKeyRange.bound(lowerBound, upperBound, false, false);
 
@@ -726,7 +679,6 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
                 episodes.push(cursor.value as EpisodeItem);
                 cursor.continue();
             } else {
-                // Sort episodes by season and then episode number (client-side sorting after fetch)
                 episodes.sort((a, b) => {
                     if ((a.seasonNumber ?? Infinity) === (b.seasonNumber ?? Infinity)) {
                         return (a.episodeNumber ?? Infinity) - (b.episodeNumber ?? Infinity);
@@ -743,3 +695,41 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
     });
 }
 
+
+// New function to get all channel items matching a baseChannelName across specified playlists
+export async function getChannelItemsByBaseNameAcrossPlaylists(
+  baseChannelName: string,
+  activePlaylistIds: string[]
+): Promise<ChannelItem[]> {
+  if (activePlaylistIds.length === 0) return [];
+  const db = await getDb();
+  const transaction = db.transaction(CHANNELS_STORE, 'readonly');
+  const store = transaction.objectStore(CHANNELS_STORE);
+  const index = store.index('playlist_baseChannelName_idx'); 
+
+  const allMatchingChannels: ChannelItem[] = [];
+
+  // Create a promise for each playlist ID to fetch channels
+  const promises = activePlaylistIds.map(playlistDbId => {
+    return new Promise<void>((resolvePlaylist, rejectPlaylist) => {
+      const keyRange = IDBKeyRange.only([playlistDbId, baseChannelName]);
+      const request = index.openCursor(keyRange);
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          allMatchingChannels.push(cursor.value as ChannelItem);
+          cursor.continue();
+        } else {
+          resolvePlaylist(); // Finished for this playlist
+        }
+      };
+      request.onerror = () => {
+        console.error(`Error fetching channels for ${baseChannelName} in playlist ${playlistDbId}:`, request.error);
+        rejectPlaylist(request.error);
+      };
+    });
+  });
+
+  await Promise.all(promises);
+  return allMatchingChannels;
+}

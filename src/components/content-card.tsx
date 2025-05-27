@@ -17,10 +17,10 @@ export function ContentCard({
   type, 
   genre, 
   dataAiHint, 
-  streamUrl, // streamUrl might be for direct play or an episode
+  streamUrl, 
   qualities,
   sourceCount,
-  seriesId // Used for navigating to series player/detail page
+  seriesId 
 }: ContentCardProps) {
   
   const router = useRouter();
@@ -30,18 +30,16 @@ export function ContentCard({
   const handleClick = () => {
     if (type === 'movie') {
       console.log(`Navigating to player for movie: ${title} (ID: ${id})`);
-      router.push(`/app/player/movie/${id}`);
+      // ID for movie is its DB ID, which should be a number, but router expects string
+      router.push(`/app/player/movie/${id.toString()}`); 
     } else if (type === 'series') {
-      // For a series card, 'id' might be the series title or first episode's ID. 
-      // 'seriesId' should be the canonical ID for the series.
       const navId = seriesId || id; 
       console.log(`Navigating to player/details for series: ${title} (SeriesID: ${navId})`);
-      router.push(`/app/player/series/${navId}`);
+      router.push(`/app/player/series/${navId.toString()}`);
     } else if (type === 'channel') {
-      // For an aggregated channel, 'id' is the baseChannelName.
-      // A dedicated channel player page would handle stream selection.
+      // For an aggregated channel, 'id' is the baseChannelName (string)
       console.log(`Navigating to player/details for channel: ${title} (BaseName: ${id})`);
-      router.push(`/app/player/channel/${id}`);
+      router.push(`/app/player/channel/${encodeURIComponent(id)}`); // Ensure baseChannelName is URL encoded
     } else {
       console.log(`Item clicked: ${title} (Type: ${type}, ID: ${id}). No navigation rule defined or streamUrl missing.`);
       alert(`Details for: ${title}\n(Player/Detail page not implemented for this type or missing URL)`);
