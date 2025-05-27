@@ -8,83 +8,69 @@ import { ContentGroupRow } from '@/components/content-group-row';
 import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, type ChannelItem } from '@/lib/db';
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input'; // Import Input
+import { Input } from '@/components/ui/input';
+import { normalizeText } from '@/lib/utils';
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
+// Helper to aggregate individual ChannelItems (potentially from different playlists or qualities)
+// into a single ContentItemForCard representing one unique channel (e.g., "ESPN")
 const aggregateChannelItemsToCard = (baseName: string, items: ChannelItem[]): ContentItemForCard => {
   if (items.length === 0) {
+    // This case should ideally not happen if items are pre-filtered
     return {
-      id: baseName,
+      id: baseName, // Use baseName as ID for aggregated channel card
       title: baseName,
       type: 'channel',
       dataAiHint: `channel ${baseName}`.substring(0, 50).trim().toLowerCase(),
       imageUrl: `https://placehold.co/300x450.png`,
     };
   }
-  const representativeItem = items[0];
+  // Try to find a representative item, e.g., one with a logo or a common quality
+  const representativeItem = items.find(i => i.logoUrl) || items[0];
   const uniqueQualities = Array.from(new Set(items.map(i => i.quality).filter(Boolean) as string[])).sort();
 
   return {
-    id: baseName,
-    title: baseName,
+    id: baseName, // Use baseName as ID
+    title: baseName, // Display baseName as title
     imageUrl: representativeItem.logoUrl,
     type: 'channel',
     dataAiHint: `channel ${baseName}`.substring(0, 50).trim().toLowerCase(),
     qualities: uniqueQualities.length > 0 ? uniqueQualities : undefined,
-    sourceCount: items.length,
+    sourceCount: items.length, // Number of different stream URLs/qualities for this base channel
   };
 };
 
+
 interface GroupedChannels {
-  groupTitle: string;
+  groupTitle: string; // The original, display-friendly group title
   items: ContentItemForCard[];
 }
 
 export default function ChannelsPage() {
-  const [allGroupedChannelItems, setAllGroupedChannelItems] = useState<GroupedChannels[]>([]);
+  const [allRawChannelItems, setAllRawChannelItems] = useState<ChannelItem[]>([]);
+  const [allChannelGroupTitles, setAllChannelGroupTitles] = useState<string[]>([]);
   const [displayedGroupedChannelItems, setDisplayedGroupedChannelItems] = useState<GroupedChannels[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [hasPlaylistsConfigured, setHasPlaylistsConfigured] = useState<boolean | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState(''); // State for search term
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const fetchAndGroupChannels = useCallback(async (playlistId: string) => {
+  const fetchAllChannelData = useCallback(async (playlistId: string) => {
     if (!playlistId) return;
     setIsLoading(true);
     try {
-      const rawChannelItemsFromDB = await getPlaylistItems(playlistId, 'channel') as ChannelItem[];
-      const groupTitles = await getAllGenresForPlaylist(playlistId, 'channel');
+      const rawItemsFromDB = await getPlaylistItems(playlistId, 'channel') as ChannelItem[];
+      setAllRawChannelItems(rawItemsFromDB);
 
-      const groups: GroupedChannels[] = groupTitles.map(groupTitle => {
-        const channelsInGroup = rawChannelItemsFromDB.filter(ch => ch.groupTitle === groupTitle);
-        const channelAggregates = new Map<string, ChannelItem[]>();
-        channelsInGroup.forEach(item => {
-          if (item.baseChannelName) {
-            if (!channelAggregates.has(item.baseChannelName)) {
-              channelAggregates.set(item.baseChannelName, []);
-            }
-            channelAggregates.get(item.baseChannelName)!.push(item);
-          }
-        });
-        const aggregatedCardsForGroup: ContentItemForCard[] = [];
-        channelAggregates.forEach((items, baseName) => {
-          aggregatedCardsForGroup.push(aggregateChannelItemsToCard(baseName, items));
-        });
-        return {
-          groupTitle: groupTitle,
-          items: aggregatedCardsForGroup.sort((a,b) => a.title.localeCompare(b.title))
-        };
-      }).filter(group => group.items.length > 0);
-
-      const sortedGroups = groups.sort((a,b) => a.groupTitle.localeCompare(b.groupTitle));
-      setAllGroupedChannelItems(sortedGroups);
-      setDisplayedGroupedChannelItems(sortedGroups); // Initially display all
+      const groupTitlesFromDB = await getAllGenresForPlaylist(playlistId, 'channel');
+      setAllChannelGroupTitles(groupTitlesFromDB);
 
     } catch (error) {
-      console.error("Failed to fetch or group channel items:", error);
-      setAllGroupedChannelItems([]);
-      setDisplayedGroupedChannelItems([]);
+      console.error("Failed to fetch channel data:", error);
+      setAllRawChannelItems([]);
+      setAllChannelGroupTitles([]);
     } finally {
       setIsLoading(false);
     }
@@ -92,20 +78,20 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     async function initializePage() {
-      setHasPlaylistsConfigured(null);
+      setHasPlaylistsConfigured(null); // Reset for accurate loading state
       setIsLoading(true);
-      setSearchTerm('');
+      setSearchTerm(''); 
       try {
         const playlists = await getAllPlaylistsMetadata();
         if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
           setActivePlaylistId(firstPlaylistId);
-          await fetchAndGroupChannels(firstPlaylistId);
+          await fetchAllChannelData(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setAllGroupedChannelItems([]);
-          setDisplayedGroupedChannelItems([]);
+          setAllRawChannelItems([]);
+          setAllChannelGroupTitles([]);
           setIsLoading(false);
         }
       } catch (error) {
@@ -115,26 +101,57 @@ export default function ChannelsPage() {
       }
     }
     initializePage();
-  }, [fetchAndGroupChannels]);
+  }, [fetchAllChannelData]);
 
-  // Effect for filtering groups based on searchTerm
+  // Effect for grouping and filtering channels
   useEffect(() => {
     if (isLoading) return;
-    if (!searchTerm) {
-      setDisplayedGroupedChannelItems(allGroupedChannelItems);
-      return;
-    }
-    const filtered = allGroupedChannelItems.filter(group =>
-      group.groupTitle.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    setDisplayedGroupedChannelItems(filtered);
-  }, [searchTerm, allGroupedChannelItems, isLoading]);
+
+    // Filter group titles first if searchTerm is for groups
+    const normalizedSearchTerm = normalizeText(searchTerm);
+    const relevantGroupTitles = searchTerm
+      ? allChannelGroupTitles.filter(title => normalizeText(title).includes(normalizedSearchTerm))
+      : allChannelGroupTitles;
+
+    const groups: GroupedChannels[] = relevantGroupTitles.map(groupTitle => {
+      // Filter raw channel items that belong to this original groupTitle (before normalization for map key)
+      const channelsInOriginalGroup = allRawChannelItems.filter(ch => 
+        ch.groupTitle === groupTitle
+      );
+
+      // Aggregate channels within this group by baseChannelName
+      const channelAggregates = new Map<string, ChannelItem[]>();
+      channelsInOriginalGroup.forEach(item => {
+        if (item.baseChannelName) {
+          if (!channelAggregates.has(item.baseChannelName)) {
+            channelAggregates.set(item.baseChannelName, []);
+          }
+          channelAggregates.get(item.baseChannelName)!.push(item);
+        }
+      });
+      
+      const aggregatedCardsForGroup: ContentItemForCard[] = [];
+      channelAggregates.forEach((items, baseName) => {
+        aggregatedCardsForGroup.push(aggregateChannelItemsToCard(baseName, items));
+      });
+
+      return {
+        groupTitle: groupTitle, // Use the original group title for display
+        items: aggregatedCardsForGroup.sort((a, b) => a.title.localeCompare(b.title))
+      };
+    }).filter(group => group.items.length > 0);
+    
+    // Groups are already effectively sorted by allChannelGroupTitles if no search,
+    // or by filtered relevantGroupTitles. If further sorting of groups is needed, apply here.
+    setDisplayedGroupedChannelItems(groups);
+
+  }, [searchTerm, allRawChannelItems, allChannelGroupTitles, isLoading]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
   };
 
-  if (hasPlaylistsConfigured === null || (isLoading && allGroupedChannelItems.length === 0)) {
+  if (hasPlaylistsConfigured === null || (isLoading && allRawChannelItems.length === 0 && allChannelGroupTitles.length === 0)) {
     return (
       <div className="container mx-auto px-0">
         <PageHeader title="Canais ao Vivo" description="Assista seus canais de TV favoritos."/>
@@ -175,10 +192,10 @@ export default function ChannelsPage() {
         (displayedGroupedChannelItems.length > 0) ? (
           displayedGroupedChannelItems.map(group => (
             <ContentGroupRow
-              key={group.groupTitle}
+              key={group.groupTitle} // Use original group title as key
               title={`${group.groupTitle} (${group.items.length})`}
               items={group.items}
-              viewAllLink={`/app/channels/group/${encodeURIComponent(group.groupTitle.toLowerCase())}`}
+              viewAllLink={`/app/channels/group/${encodeURIComponent(group.groupTitle)}`} // Use original for link
               itemType="channel"
             />
           ))
@@ -193,5 +210,3 @@ export default function ChannelsPage() {
     </div>
   );
 }
-
-    

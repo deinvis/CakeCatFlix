@@ -17,6 +17,7 @@ import type {
   SeriesItem,
   EpisodeItem
 } from '@/lib/constants';
+import { normalizeText } from '@/lib/utils'; // Import normalizeText
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -384,16 +385,17 @@ export async function getPlaylistItems(
       const items: any[] = [];
       let advancedCount = 0; 
       let itemsAdded = 0;
+      let advanced = false; // Flag to indicate if cursor.advance has been used
       
       const cursorRequest = index.openCursor(range);
 
       cursorRequest.onsuccess = (event) => {
           const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
           if (cursor) {
-              if (offset > 0 && advancedCount < offset) {
-                  advancedCount++;
-                  cursor.continue();
-                  return;
+              if (offset > 0 && !advanced) {
+                  advanced = true; // Set flag to true after advancing once
+                  cursor.advance(offset); // Advance by the offset amount
+                  return; // Return to wait for the next onsuccess event after advancing
               }
 
               if (limit && itemsAdded >= limit) {
@@ -416,31 +418,37 @@ export async function getPlaylistItems(
 
 export async function getPlaylistItemsByGroup(
   playlistDbId: string,
-  groupTitle: string,
-  itemType: 'movie' | 'series' | 'channel', // itemType is now mandatory
+  groupTitle: string, // This should be the non-normalized group title for display
+  itemType: 'movie' | 'series' | 'channel',
   limit?: number,
   offset: number = 0
 ): Promise<any[]> {
     const db = await getDb();
     let storeName: string;
     let indexName: string;
-    let keyRangeValue: IDBValidKey | IDBKeyRange = IDBKeyRange.only([playlistDbId, groupTitle]);
+    // For querying, we use the normalized groupTitle if the index stores normalized values,
+    // or filter client-side if the index stores original values.
+    // Assuming the index stores original values for now, as 'groupTitle' for channels and 'genre' for movies/series.
+    let keyRangeValue: IDBKeyRange;
+
 
     switch(itemType) {
         case 'movie':
             storeName = MOVIES_STORE;
             indexName = 'playlist_genre_idx'; 
+            keyRangeValue = IDBKeyRange.only([playlistDbId, groupTitle]);
             break;
         case 'series':
             storeName = SERIES_STORE;
-            indexName = 'playlist_genre_idx'; 
+            indexName = 'playlist_genre_idx';
+            keyRangeValue = IDBKeyRange.only([playlistDbId, groupTitle]);
             break;
         case 'channel':
             storeName = CHANNELS_STORE;
-            indexName = 'playlist_groupTitle_idx'; 
+            indexName = 'playlist_groupTitle_idx';
+            keyRangeValue = IDBKeyRange.only([playlistDbId, groupTitle]);
             break;
         default:
-            // Should not happen if itemType is enforced by TypeScript
             return Promise.reject(new Error("Invalid itemType for getPlaylistItemsByGroup."));
     }
 
@@ -450,16 +458,16 @@ export async function getPlaylistItemsByGroup(
         const index = store.index(indexName);
 
         const items: any[] = [];
-        let advancedCount = 0;
+        let advanced = false;
         let itemsAdded = 0;
 
         const cursorRequest = index.openCursor(keyRangeValue);
         cursorRequest.onsuccess = (event) => {
             const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
             if (cursor) {
-                if (offset > 0 && advancedCount < offset) {
-                  advancedCount++;
-                  cursor.continue();
+                if (offset > 0 && !advanced) {
+                  advanced = true;
+                  cursor.advance(offset);
                   return;
                 }
                 if (limit && itemsAdded >= limit) {
@@ -579,20 +587,26 @@ export async function getAllGenresForPlaylist(
     const index = store.index('playlistDbId_idx');
     const range = IDBKeyRange.only(playlistDbId);
 
-    const uniqueValues = new Set<string>();
+    const normalizedGenreMap = new Map<string, string>(); // Map normalized_genre -> original_genre
     const request = index.openCursor(range);
 
     request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
             const item = cursor.value as MovieItem | SeriesItem | ChannelItem;
-            const value = item[fieldToCollect as keyof typeof item] as string | undefined;
-            if (value) {
-                uniqueValues.add(value);
+            const originalValue = item[fieldToCollect as keyof typeof item] as string | undefined;
+            if (originalValue) {
+                const normalizedValue = normalizeText(originalValue);
+                if (normalizedValue && !normalizedGenreMap.has(normalizedValue)) {
+                    normalizedGenreMap.set(normalizedValue, originalValue);
+                }
             }
             cursor.continue();
         } else {
-            resolve(Array.from(uniqueValues).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: 'base'})));
+            // Sort by the original value for display consistency
+            const uniqueOriginalValues = Array.from(normalizedGenreMap.values())
+                                             .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            resolve(uniqueOriginalValues);
         }
     };
     request.onerror = () => {
@@ -639,19 +653,15 @@ export async function getMovieItemsByTitleYearAcrossPlaylists(
 
     const promises = activePlaylistIds.map(playlistDbId => {
         return new Promise<void>((resolvePlaylist, rejectPlaylist) => {
-            // If year is undefined, we might need a different query or to iterate more.
-            // For simplicity now, this query assumes year is part of the index effectively.
-            // A more robust query might involve fetching by title and then client-side filtering by year if year isn't always present or reliably indexed.
-            const keyRange = year
+            const keyRange = year !== undefined
                 ? IDBKeyRange.only([playlistDbId, title, year])
-                : IDBKeyRange.bound([playlistDbId, title, -Infinity], [playlistDbId, title, Infinity]); // Attempt to get all years for title
+                : IDBKeyRange.bound([playlistDbId, title, -Infinity], [playlistDbId, title, Infinity]);
 
-            const request = index.getAll(keyRange); // Using getAll for potentially multiple matches (though index should be unique per playlist)
+            const request = index.getAll(keyRange);
             
             request.onsuccess = (event) => {
                 const moviesInPlaylist = (event.target as IDBRequest).result as MovieItem[];
                 moviesInPlaylist.forEach(movie => {
-                     // Double check title and year client-side if year was originally undefined for query
                     if (movie.title === title && (year === undefined || movie.year === year)) {
                          allMatchingMovies.push(movie);
                     }
@@ -723,16 +733,13 @@ export async function getEpisodesForSeries(playlistDbId: string, seriesDbId: num
 
 
 export async function getEpisodesForSeriesAcrossPlaylists(
-  seriesDbId: number, // This is the SeriesItem.id
+  seriesDbId: number, 
   activePlaylistIds: string[]
 ): Promise<EpisodeItem[]> {
   if (activePlaylistIds.length === 0) return [];
   const db = await getDb();
   const transaction = db.transaction(EPISODES_STORE, 'readonly');
   const store = transaction.objectStore(EPISODES_STORE);
-  // We need an index on seriesDbId that we can iterate through
-  // and then filter by playlistDbId client-side, or a compound index.
-  // Let's assume 'seriesDbId_season_episode_idx' can be used, or just 'seriesDbId_idx'
   const index = store.index('seriesDbId_idx'); 
 
   const allMatchingEpisodes: EpisodeItem[] = [];
@@ -743,13 +750,11 @@ export async function getEpisodesForSeriesAcrossPlaylists(
       const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
       if (cursor) {
         const episode = cursor.value as EpisodeItem;
-        // Filter by active playlists
         if (activePlaylistIds.includes(episode.playlistDbId)) {
           allMatchingEpisodes.push(episode);
         }
         cursor.continue();
       } else {
-        // Sort episodes once all are collected
         allMatchingEpisodes.sort((a, b) => {
           const seasonCompare = (a.seasonNumber ?? Infinity) - (b.seasonNumber ?? Infinity);
           if (seasonCompare !== 0) return seasonCompare;
@@ -801,3 +806,4 @@ export async function getChannelItemsByBaseNameAcrossPlaylists(
   await Promise.all(promises);
   return allMatchingChannels;
 }
+

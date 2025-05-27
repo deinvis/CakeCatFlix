@@ -9,6 +9,7 @@ import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, typ
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
+import { normalizeText } from '@/lib/utils';
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
@@ -23,13 +24,13 @@ const transformMovieItemToCardItem = (item: MovieItem): ContentItemForCard => ({
 });
 
 interface GroupedMovies {
-  genre: string;
+  genre: string; // The original, display-friendly genre name
   items: ContentItemForCard[];
 }
 
 export default function MoviesPage() {
-  const [allRawMovieCardItems, setAllRawMovieCardItems] = useState<ContentItemForCard[]>([]);
-  const [allMovieGenres, setAllMovieGenres] = useState<string[]>([]);
+  const [allRawMovieItems, setAllRawMovieItems] = useState<MovieItem[]>([]);
+  const [allMovieGenres, setAllMovieGenres] = useState<string[]>([]); // Stores original genre names
   const [displayedGroupedMovieItems, setDisplayedGroupedMovieItems] = useState<GroupedMovies[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
@@ -42,15 +43,14 @@ export default function MoviesPage() {
     setIsLoading(true);
     try {
       const rawMovieItemsFromDB = await getPlaylistItems(playlistId, 'movie') as MovieItem[];
-      const cardItems = rawMovieItemsFromDB.map(transformMovieItemToCardItem);
-      setAllRawMovieCardItems(cardItems);
+      setAllRawMovieItems(rawMovieItemsFromDB);
 
       const genresFromDB = await getAllGenresForPlaylist(playlistId, 'movie');
-      setAllMovieGenres(genresFromDB.sort((a,b) => a.localeCompare(b)));
+      setAllMovieGenres(genresFromDB); // These are already de-duplicated original names
 
     } catch (error) {
       console.error("Failed to fetch movie data:", error);
-      setAllRawMovieCardItems([]);
+      setAllRawMovieItems([]);
       setAllMovieGenres([]);
     } finally {
       setIsLoading(false);
@@ -71,7 +71,7 @@ export default function MoviesPage() {
           await fetchAllMovieData(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setAllRawMovieCardItems([]);
+          setAllRawMovieItems([]);
           setAllMovieGenres([]);
           setIsLoading(false);
         }
@@ -87,31 +87,38 @@ export default function MoviesPage() {
    useEffect(() => {
     if (isLoading) return;
 
-    let itemsToGroup = allRawMovieCardItems;
+    const normalizedSearchTerm = normalizeText(searchTerm);
+    let itemsToGroupAndFilter = allRawMovieItems;
+
+    // Filter items by title if search term exists
     if (searchTerm) {
-      itemsToGroup = allRawMovieCardItems.filter(item =>
-        item.title.toLowerCase().includes(searchTerm.toLowerCase())
+      itemsToGroupAndFilter = allRawMovieItems.filter(item =>
+        normalizeText(item.title).includes(normalizedSearchTerm)
       );
     }
-
-    const groups: GroupedMovies[] = allMovieGenres.map(genre => ({
-      genre: genre,
-      items: itemsToGroup.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
-    })).filter(group => group.items.length > 0);
     
-    // If searching and groups result from filtered items, sort them. 
-    // Otherwise, genres are already sorted.
-    // No, sorting groups by genre name should always be consistent.
-    const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
-    setDisplayedGroupedMovieItems(sortedGroups);
+    const groups: GroupedMovies[] = allMovieGenres.map(originalGenre => {
+      const normalizedGenre = normalizeText(originalGenre);
+      const itemsForThisGenre = itemsToGroupAndFilter.filter(item => 
+        normalizeText(item.genre) === normalizedGenre
+      ).map(transformMovieItemToCardItem);
+      
+      return {
+        genre: originalGenre, // Display the original genre name
+        items: itemsForThisGenre
+      };
+    }).filter(group => group.items.length > 0);
+    
+    // The genres in allMovieGenres are already sorted from DB, so groups should reflect that.
+    setDisplayedGroupedMovieItems(groups);
 
-  }, [searchTerm, allRawMovieCardItems, allMovieGenres, isLoading]);
+  }, [searchTerm, allRawMovieItems, allMovieGenres, isLoading]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
   };
 
-  if (hasPlaylistsConfigured === null || (isLoading && allRawMovieCardItems.length === 0 && allMovieGenres.length === 0)) {
+  if (hasPlaylistsConfigured === null || (isLoading && allRawMovieItems.length === 0 && allMovieGenres.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Filmes" description="Explore uma vasta coleção de filmes." />
@@ -142,7 +149,7 @@ export default function MoviesPage() {
       <div className="mb-6">
         <Input
           type="search"
-          placeholder="Buscar por filmes..." // Updated placeholder
+          placeholder="Buscar por filmes..." 
           className="w-full sm:w-72"
           value={searchTerm}
           onChange={handleSearchChange}
@@ -152,10 +159,10 @@ export default function MoviesPage() {
         displayedGroupedMovieItems.length > 0 ? (
           displayedGroupedMovieItems.map(group => (
             <ContentGroupRow
-              key={group.genre}
+              key={group.genre} // Use original genre name as key
               title={`${group.genre} (${group.items.length})`}
               items={group.items}
-              viewAllLink={`/app/movies/genre/${encodeURIComponent(group.genre.toLowerCase())}`}
+              viewAllLink={`/app/movies/genre/${encodeURIComponent(group.genre)}`} // Use original for link
               itemType="movie"
             />
           ))

@@ -9,28 +9,30 @@ import { getAllPlaylistsMetadata, getPlaylistItems, getAllGenresForPlaylist, typ
 import type { ContentItemForCard } from '@/lib/constants';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
+import { normalizeText } from '@/lib/utils';
 
 const ITEMS_PER_ROW_PREVIEW = 6;
 
 const transformSeriesItemToCardItem = (series: SeriesItem, episodeCount: number): ContentItemForCard => ({
-  id: series.id!.toString(),
+  id: series.id!.toString(), // This is the SeriesItem.id
+  seriesId: series.id!.toString(), // Explicitly for navigation
   title: series.title,
   imageUrl: series.logoUrl,
   type: 'series',
   genre: series.genre,
   dataAiHint: `series ${series.title || series.genre || ''}`.substring(0, 50).trim().toLowerCase(),
-  seriesId: series.id!.toString(), // Critical for navigation to series player
-  sourceCount: episodeCount, // Number of episodes
+  sourceCount: episodeCount, // Number of episodes for this series
 });
 
 interface GroupedSeries {
-  genre: string;
+  genre: string; // The original, display-friendly genre name
   items: ContentItemForCard[];
 }
 
 export default function SeriesPage() {
-  const [allRawSeriesCardItems, setAllRawSeriesCardItems] = useState<ContentItemForCard[]>([]);
-  const [allSeriesGenres, setAllSeriesGenres] = useState<string[]>([]);
+  const [allRawSeriesItems, setAllRawSeriesItems] = useState<SeriesItem[]>([]);
+  const [allEpisodeItems, setAllEpisodeItems] = useState<EpisodeItem[]>([]);
+  const [allSeriesGenres, setAllSeriesGenres] = useState<string[]>([]); // Stores original genre names
   const [displayedGroupedSeriesItems, setDisplayedGroupedSeriesItems] = useState<GroupedSeries[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
@@ -42,29 +44,19 @@ export default function SeriesPage() {
     if (!playlistId) return;
     setIsLoading(true);
     try {
-      // Fetch unique series (SeriesItem)
       const uniqueSeriesFromDB = await getPlaylistItems(playlistId, 'series') as SeriesItem[];
+      setAllRawSeriesItems(uniqueSeriesFromDB);
       
-      // Fetch all episodes to count them for each series
-      const allEpisodesFromDB = await getPlaylistItems(playlistId, 'episode') as EpisodeItem[];
-      const episodeCounts = new Map<number, number>();
-      allEpisodesFromDB.forEach(ep => {
-        if (ep.seriesDbId !== undefined) {
-          episodeCounts.set(ep.seriesDbId, (episodeCounts.get(ep.seriesDbId) || 0) + 1);
-        }
-      });
-
-      const cardItems = uniqueSeriesFromDB.map(series =>
-        transformSeriesItemToCardItem(series, series.id !== undefined ? (episodeCounts.get(series.id) || 0) : 0)
-      );
-      setAllRawSeriesCardItems(cardItems);
+      const episodesFromDB = await getPlaylistItems(playlistId, 'episode') as EpisodeItem[];
+      setAllEpisodeItems(episodesFromDB);
 
       const genresFromDB = await getAllGenresForPlaylist(playlistId, 'series');
-      setAllSeriesGenres(genresFromDB.sort((a,b)=> a.localeCompare(b)));
+      setAllSeriesGenres(genresFromDB); // These are already de-duplicated original names
 
     } catch (error) {
       console.error("Failed to fetch series data:", error);
-      setAllRawSeriesCardItems([]);
+      setAllRawSeriesItems([]);
+      setAllEpisodeItems([]);
       setAllSeriesGenres([]);
     } finally {
       setIsLoading(false);
@@ -85,7 +77,8 @@ export default function SeriesPage() {
           await fetchAllSeriesData(firstPlaylistId);
         } else {
           setHasPlaylistsConfigured(false);
-          setAllRawSeriesCardItems([]);
+          setAllRawSeriesItems([]);
+          setAllEpisodeItems([]);
           setAllSeriesGenres([]);
           setIsLoading(false);
         }
@@ -101,29 +94,44 @@ export default function SeriesPage() {
    useEffect(() => {
     if (isLoading) return;
 
-    let itemsToGroup = allRawSeriesCardItems;
+    const normalizedSearchTerm = normalizeText(searchTerm);
+    let seriesToGroupAndFilter = allRawSeriesItems;
+
     if (searchTerm) {
-      itemsToGroup = allRawSeriesCardItems.filter(item =>
-        item.title.toLowerCase().includes(searchTerm.toLowerCase())
+      seriesToGroupAndFilter = allRawSeriesItems.filter(series =>
+        normalizeText(series.title).includes(normalizedSearchTerm)
       );
     }
+
+    const episodeCounts = new Map<number, number>();
+    allEpisodeItems.forEach(ep => {
+      if (ep.seriesDbId !== undefined) {
+        episodeCounts.set(ep.seriesDbId, (episodeCounts.get(ep.seriesDbId) || 0) + 1);
+      }
+    });
     
-    const groups: GroupedSeries[] = allSeriesGenres.map(genre => ({
-      genre: genre,
-      items: itemsToGroup.filter(item => item.genre?.toLowerCase() === genre.toLowerCase())
-    })).filter(group => group.items.length > 0);
+    const groups: GroupedSeries[] = allSeriesGenres.map(originalGenre => {
+      const normalizedGenre = normalizeText(originalGenre);
+      const itemsForThisGenre = seriesToGroupAndFilter
+        .filter(series => normalizeText(series.genre) === normalizedGenre)
+        .map(series => transformSeriesItemToCardItem(series, series.id !== undefined ? (episodeCounts.get(series.id) || 0) : 0));
+      
+      return {
+        genre: originalGenre, // Display original genre name
+        items: itemsForThisGenre
+      };
+    }).filter(group => group.items.length > 0);
+    
+    setDisplayedGroupedSeriesItems(groups);
 
-    const sortedGroups = groups.sort((a,b) => a.genre.localeCompare(b.genre));
-    setDisplayedGroupedSeriesItems(sortedGroups);
-
-  }, [searchTerm, allRawSeriesCardItems, allSeriesGenres, isLoading]);
+  }, [searchTerm, allRawSeriesItems, allEpisodeItems, allSeriesGenres, isLoading]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
   };
 
 
-  if (hasPlaylistsConfigured === null || (isLoading && allRawSeriesCardItems.length === 0 && allSeriesGenres.length === 0)) {
+  if (hasPlaylistsConfigured === null || (isLoading && allRawSeriesItems.length === 0 && allSeriesGenres.length === 0)) {
      return (
       <div className="container mx-auto px-0">
         <PageHeader title="Séries de TV" description="Assista suas séries favoritas e descubra novas." />
@@ -154,7 +162,7 @@ export default function SeriesPage() {
        <div className="mb-6">
         <Input
           type="search"
-          placeholder="Buscar por séries..." // Updated placeholder
+          placeholder="Buscar por séries..." 
           className="w-full sm:w-72"
           value={searchTerm}
           onChange={handleSearchChange}
@@ -164,10 +172,10 @@ export default function SeriesPage() {
         displayedGroupedSeriesItems.length > 0 ? (
           displayedGroupedSeriesItems.map(group => (
             <ContentGroupRow
-              key={group.genre}
+              key={group.genre} // Use original genre name as key
               title={`${group.genre} (${group.items.length})`}
               items={group.items}
-              viewAllLink={`/app/series/genre/${encodeURIComponent(group.genre.toLowerCase())}`}
+              viewAllLink={`/app/series/genre/${encodeURIComponent(group.genre)}`} // Use original for link
               itemType="series"
             />
           ))
