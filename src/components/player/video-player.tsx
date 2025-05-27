@@ -43,21 +43,29 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
     setIsLoading(false);
     let errorMessage = "Ocorreu um erro ao carregar o vídeo."; // Default
 
-    // Log more detailed error information to the console for debugging
-    console.error("VideoPlayer Error (Raw Details):", { 
-        errorObj: e, 
-        dataObj: data, 
-        hlsInstanceObj: hlsInstance, 
+    let suspectedCorsIssue = false;
+    // Check if 'e' is an empty object and 'data' is not providing more details
+    if (typeof e === 'object' && e !== null && Object.keys(e).length === 0 && !data) {
+        suspectedCorsIssue = true;
+    }
+
+    console.error(
+      "VideoPlayer Error (Raw Details):",
+      {
+        errorObj: e,
+        dataObj: data,
+        hlsInstanceObj: hlsInstance,
         hlsGlobalObj: hlsGlobal,
-        streamUrl: streamUrl 
-    });
+        streamUrl: streamUrl,
+      },
+      suspectedCorsIssue ? "This pattern (empty error object without additional data) often indicates a CORS issue with the video server." : ""
+    );
 
     if (streamUrl?.toLowerCase().endsWith('.mp4')) {
-        if (e?.type === 'error' && (data?.type === 'networkError' || data?.details?.includes('manifestLoadError'))) {
-            errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível.";
-        } else if (typeof e === 'object' && Object.keys(e).length === 0 && !data) {
-            // This is a common sign of a CORS issue when direct error details are suppressed by the browser
+        if (suspectedCorsIssue) {
             errorMessage = "Não foi possível carregar o vídeo MP4. Isso pode ser devido a restrições de CORS no servidor de vídeo ou o arquivo pode não estar acessível. Tente abrir a URL do vídeo diretamente em outra aba do navegador.";
+        } else if (e?.type === 'error' && (data?.type === 'networkError' || data?.details?.includes('manifestLoadError'))) {
+            errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível.";
         } else if (e?.message) {
             errorMessage = e.message;
         } else if (data?.type) {
@@ -133,11 +141,8 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
             className="absolute top-0 left-0"
             config={{
               file: {
-                // forceHLS: streamUrl.includes('.m3u8'), // Use this if you know it's HLS
-                // forceVideo: streamUrl.toLowerCase().endsWith('.mp4'), // Usually not needed for MP4
                 attributes: {
-                    crossOrigin: 'anonymous', // Helps with CORS if server supports it
-                    // controlsList: 'nodownload', // Example: to disable download button
+                    crossOrigin: 'anonymous', 
                 }
               },
             }}
