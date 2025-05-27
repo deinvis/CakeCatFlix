@@ -13,26 +13,20 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
+        hostname: 'placehold.co', // Keep this specific one for safety as it's used for placeholders
         port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'http',
-        hostname: 'appcliente.com', // Added this hostname
-        port: '', // Allow any port, or specify if known (e.g., '8880')
         pathname: '/**',
       },
       {
         protocol: 'http',
         hostname: '**', // Allow any hostname over HTTP
-        port: '',
+        port: '', // Allow any port
         pathname: '/**',
       },
       {
         protocol: 'https',
         hostname: '**', // Allow any hostname over HTTPS
-        port: '',
+        port: '', // Allow any port
         pathname: '/**',
       },
     ],
