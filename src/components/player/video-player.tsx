@@ -28,26 +28,22 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
       setIsLoading(true);
       setError(null);
     } else {
-      setIsLoading(false);
-      setError(null); // Clear error if streamUrl becomes null (e.g. source deselected)
+      setIsLoading(false); // Stop loading if streamUrl becomes null
+      setError(null); // Clear error if streamUrl becomes null
     }
   }, [streamUrl]);
 
   const handleReady = () => {
     console.log("VideoPlayer: Ready");
     setIsLoading(false);
-    setError(null); // Clear any previous error on ready
+    setError(null);
   };
 
   const handleError = (e: any, data?: any, hlsInstance?: any, hlsGlobal?: any) => {
     setIsLoading(false);
     let errorMessage = "Ocorreu um erro ao carregar o vídeo."; // Default
 
-    let suspectedCorsIssue = false;
-    // Check if 'e' is an empty object and 'data' is not providing more details
-    if (typeof e === 'object' && e !== null && Object.keys(e).length === 0 && !data) {
-        suspectedCorsIssue = true;
-    }
+    const suspectedCorsIssue = typeof e === 'object' && e !== null && Object.keys(e).length === 0 && !data;
 
     console.error(
       "VideoPlayer Error (Raw Details):",
@@ -58,41 +54,41 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
         hlsGlobalObj: hlsGlobal,
         streamUrl: streamUrl,
       },
-      suspectedCorsIssue ? "This pattern (empty error object without additional data) often indicates a CORS issue with the video server." : ""
+      suspectedCorsIssue ? "This pattern (empty error object without additional data) often indicates a CORS issue with the video server. Check the network tab for blocked requests." : ""
     );
 
     if (streamUrl?.toLowerCase().endsWith('.mp4')) {
-        if (suspectedCorsIssue) {
-            errorMessage = "Não foi possível carregar o vídeo MP4. Isso pode ser devido a restrições de CORS no servidor de vídeo ou o arquivo pode não estar acessível. Tente abrir a URL do vídeo diretamente em outra aba do navegador.";
-        } else if (e?.type === 'error' && (data?.type === 'networkError' || data?.details?.includes('manifestLoadError'))) {
-            errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível.";
-        } else if (e?.message) {
-            errorMessage = e.message;
-        } else if (data?.type) {
-            errorMessage = `Erro do player: ${data.type}`;
-        }
-    } else if (e?.message) { // For non-MP4 or if MP4-specific checks didn't catch it
-        errorMessage = e.message;
+      if (suspectedCorsIssue) {
+        errorMessage = "Não foi possível carregar o vídeo MP4. Isso pode ser devido a restrições de CORS no servidor de vídeo ou o arquivo pode não estar acessível. Verifique se a URL do vídeo abre diretamente no navegador e observe o console para erros de CORS.";
+      } else if (e?.type === 'error' && (data?.type === 'networkError' || data?.details?.includes('manifestLoadError') || data?.details?.includes('fragLoadError'))) {
+        errorMessage = "Falha ao carregar o vídeo MP4. Verifique sua conexão com a internet ou se o arquivo está acessível e não corrompido.";
+      } else if (e?.message) {
+        errorMessage = `Erro no player: ${e.message}`;
+      } else if (data?.type) {
+        errorMessage = `Erro do player: ${data.type}${data.details ? ` (${data.details})` : ''}`;
+      }
+    } else if (e?.message) {
+      errorMessage = `Erro no player: ${e.message}`;
     } else if (data?.type) {
-        errorMessage = `Erro do player: ${data.type}`;
+      errorMessage = `Erro do player: ${data.type}${data.details ? ` (${data.details})` : ''}`;
     }
     
     setError(errorMessage);
-    if (onError) onError(e, data); // Propagate original error if a handler is passed as prop
+    if (onError) onError(e, data);
   };
 
   const handleBuffer = () => {
     console.log("VideoPlayer: Buffering...");
-    setIsLoading(true);
+    if (!error) setIsLoading(true); // Only show loading if no error
   }
   const handleBufferEnd = () => {
     console.log("VideoPlayer: BufferEnd");
-    setIsLoading(false);
+    if (!error) setIsLoading(false);
   }
   const handlePlay = () => {
     console.log("VideoPlayer: Play");
-    setIsLoading(false); // Should not be loading if play starts
-    setError(null);
+    if (!error) setIsLoading(false); // Should not be loading if play starts
+    setError(null); // Clear error on successful play
   }
 
   if (!isClient) {
@@ -118,10 +114,10 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-destructive-foreground bg-destructive/80 p-4 z-10">
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-destructive-foreground bg-destructive/80 p-4 z-10 text-center">
           <AlertTriangle className="h-12 w-12 mb-2" />
           <p className="font-semibold">Erro ao Carregar Vídeo</p>
-          <p className="text-sm text-center">{error}</p>
+          <p className="text-sm">{error}</p>
         </div>
       )}
       {streamUrl && ( 
@@ -143,7 +139,9 @@ export function VideoPlayer({ streamUrl, onEnded, onError, playing = true }: Vid
               file: {
                 attributes: {
                     crossOrigin: 'anonymous', 
-                }
+                },
+                // forceVideo: streamUrl?.toLowerCase().endsWith('.mp4'), // Can sometimes help for ambiguous URLs, but usually not needed
+                // forceHLS: streamUrl?.toLowerCase().endsWith('.m3u8'),
               },
             }}
           />
