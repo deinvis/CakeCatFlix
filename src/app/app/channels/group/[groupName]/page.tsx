@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { PlaceholderContent } from '@/components/placeholder-content';
 import { ContentGrid } from '@/components/content-grid';
@@ -26,7 +26,7 @@ const aggregateChannelItemsToCard = (baseName: string, items: ChannelItem[]): Co
       imageUrl: `https://placehold.co/300x450.png`,
     };
   }
-  const representativeItem = items[0];
+  const representativeItem = items.find(i => i.logoUrl) || items[0]; // Prefer item with logo
   const uniqueQualities = Array.from(new Set(items.map(i => i.quality).filter(Boolean) as string[])).sort();
 
   return {
@@ -42,11 +42,12 @@ const aggregateChannelItemsToCard = (baseName: string, items: ChannelItem[]): Co
 
 export default function ChannelGroupPage() {
   const params = useParams<{ groupName: string }>();
-  const groupNameDecoded = params.groupName ? decodeURIComponent(params.groupName) : "Unknown Group";
+  // groupNameFromUrl is the NORMALIZED group name from the URL
+  const groupNameFromUrl = useMemo(() => params.groupName ? decodeURIComponent(params.groupName) : "Unknown Group", [params.groupName]);
 
   const [allFetchedRawChannelsInGroup, setAllFetchedRawChannelsInGroup] = useState<ChannelItem[]>([]);
-  const [allAggregatedBaseChannels, setAllAggregatedBaseChannels] = useState<ContentItemForCard[]>([]); // Stores ALL aggregated cards for search
-  const [displayedChannelCards, setDisplayedChannelCards] = useState<ContentItemForCard[]>([]); // Paginated & Searched
+  const [allAggregatedBaseChannels, setAllAggregatedBaseChannels] = useState<ContentItemForCard[]>([]); 
+  const [displayedChannelCards, setDisplayedChannelCards] = useState<ContentItemForCard[]>([]); 
 
   const [isLoading, setIsLoading] = useState(true);
   const [isPaginating, setIsPaginating] = useState(false);
@@ -57,23 +58,28 @@ export default function ChannelGroupPage() {
   const [hasMore, setHasMore] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetches ALL raw channels for this group from the DB
-  const fetchAllChannelsForGroup = useCallback(async (playlistId: string, group: string) => {
-    if (!playlistId || !group) return;
+  // Fetches ALL raw channels for this NORMALIZED group from the DB
+  const fetchAllChannelsForGroup = useCallback(async (playlistId: string, normalizedGroup: string) => {
+    if (!playlistId || !normalizedGroup || normalizedGroup === "Unknown Group") {
+        setAllFetchedRawChannelsInGroup([]);
+        setIsLoading(false);
+        return;
+    }
     setIsLoading(true);
     try {
-      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, group, undefined, undefined, 'channel');
+      // getPlaylistItemsByGroup expects a NORMALIZED group title
+      // console.log(`Fetching channels for playlist: ${playlistId}, normalized group: "${normalizedGroup}"`);
+      const itemsFromDB = await getPlaylistItemsByGroup(playlistId, normalizedGroup, 'channel');
       setAllFetchedRawChannelsInGroup(itemsFromDB as ChannelItem[]);
-      setCurrentPage(1); // Reset page for new group data
+      setCurrentPage(1); 
     } catch (error) {
-      console.error(`Failed to fetch channels for group "${group}":`, error);
+      console.error(`Failed to fetch channels for group "${normalizedGroup}":`, error);
       setAllFetchedRawChannelsInGroup([]);
     } finally {
       setIsLoading(false); 
     }
-  }, []);
+  }, []); // Removed activePlaylistId as it's passed directly
 
-  // Initializes the page, fetching playlist config and then all channels for the group
   useEffect(() => {
     async function initialize() {
       setHasPlaylistsConfigured(null);
@@ -90,12 +96,13 @@ export default function ChannelGroupPage() {
         if (playlists.length > 0 && playlists[0]?.id) {
           setHasPlaylistsConfigured(true);
           const firstPlaylistId = playlists[0].id;
-          setActivePlaylistId(firstPlaylistId);
-          if (groupNameDecoded !== "Unknown Group") {
-            await fetchAllChannelsForGroup(firstPlaylistId, groupNameDecoded);
+          setActivePlaylistId(firstPlaylistId); // Set activePlaylistId here
+          if (groupNameFromUrl !== "Unknown Group") {
+            // Pass firstPlaylistId directly to fetchAllChannelsForGroup
+            await fetchAllChannelsForGroup(firstPlaylistId, groupNameFromUrl);
           } else {
              setAllFetchedRawChannelsInGroup([]);
-             setIsLoading(false); // Ensure loading stops if group is unknown
+             setIsLoading(false); 
           }
         } else {
           setHasPlaylistsConfigured(false);
@@ -108,22 +115,23 @@ export default function ChannelGroupPage() {
       }
     }
     initialize();
-  }, [groupNameDecoded, fetchAllChannelsForGroup]);
+  }, [groupNameFromUrl, fetchAllChannelsForGroup]); 
 
-  // Aggregates raw channels once they are fetched
   useEffect(() => {
-    if (isLoading || allFetchedRawChannelsInGroup.length === 0 && groupNameDecoded === "Unknown Group" && !hasPlaylistsConfigured) {
+    if (isLoading || (allFetchedRawChannelsInGroup.length === 0 && groupNameFromUrl === "Unknown Group" && !hasPlaylistsConfigured)) {
       if (!isLoading) setAllAggregatedBaseChannels([]);
       return;
     }
     
     const channelAggregates = new Map<string, ChannelItem[]>();
     allFetchedRawChannelsInGroup.forEach(item => {
-      if (item.baseChannelName) {
+      if (item.baseChannelName) { 
         if (!channelAggregates.has(item.baseChannelName)) {
           channelAggregates.set(item.baseChannelName, []);
         }
         channelAggregates.get(item.baseChannelName)!.push(item);
+      } else {
+        // console.warn("Channel item missing baseChannelName:", item);
       }
     });
 
@@ -133,19 +141,18 @@ export default function ChannelGroupPage() {
     });
     aggregated.sort((a,b) => a.title.localeCompare(b.title));
     setAllAggregatedBaseChannels(aggregated);
-    setCurrentPage(1); // Reset page when aggregation changes
+    setCurrentPage(1); 
 
-  }, [allFetchedRawChannelsInGroup, isLoading, groupNameDecoded, hasPlaylistsConfigured]);
+  }, [allFetchedRawChannelsInGroup, isLoading, groupNameFromUrl, hasPlaylistsConfigured]);
 
 
-  // Effect for filtering and pagination based on allAggregatedBaseChannels, searchTerm, and currentPage
   useEffect(() => {
-    if (allAggregatedBaseChannels.length === 0 && !isLoading) { // If no base channels and not loading, ensure display is empty
+    if (allAggregatedBaseChannels.length === 0 && !isLoading) { 
         setDisplayedChannelCards([]);
         setHasMore(false);
         return;
     }
-    if (isLoading && allAggregatedBaseChannels.length === 0) return; // Wait if initial load still in progress
+    if (isLoading && allAggregatedBaseChannels.length === 0) return; 
 
     setIsPaginating(true);
     const filtered = allAggregatedBaseChannels.filter(card =>
@@ -158,7 +165,6 @@ export default function ChannelGroupPage() {
     if (currentPage === 1) {
       setDisplayedChannelCards(newPageItems);
     } else {
-       // Prevent adding duplicates if effect runs multiple times with same newPageItems
         setDisplayedChannelCards(prevItems => {
             const existingIds = new Set(prevItems.map(item => item.id));
             const trulyNewItems = newPageItems.filter(item => !existingIds.has(item.id));
@@ -182,15 +188,18 @@ export default function ChannelGroupPage() {
     setCurrentPage(1); 
     setDisplayedChannelCards([]);
   };
+  
+  // Display the groupNameFromUrl in the header as it's the normalized identifier
+  const displayPageTitle = groupNameFromUrl === "Unknown Group" ? "Grupo Desconhecido" : groupNameFromUrl;
 
-  if (hasPlaylistsConfigured === null || (isLoading && allFetchedRawChannelsInGroup.length === 0 && groupNameDecoded !== "Unknown Group")) {
+  if (hasPlaylistsConfigured === null || (isLoading && allFetchedRawChannelsInGroup.length === 0 && groupNameFromUrl !== "Unknown Group")) {
     return (
          <div className="container mx-auto px-0">
             <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <Skeleton className="h-10 w-48 rounded-md" />
                 <Skeleton className="h-10 w-full sm:w-auto sm:max-w-xs rounded-md" />
             </div>
-            <PageHeader title={groupNameDecoded} description={`Procurando canais em ${groupNameDecoded}...`} />
+            <PageHeader title={displayPageTitle} description={`Procurando canais em ${displayPageTitle}...`} />
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 md:gap-6">
             {Array.from({ length: ITEMS_PER_PAGE }).map((_, i) => (
                 <div key={i} className="aspect-[2/3] w-full">
@@ -204,10 +213,10 @@ export default function ChannelGroupPage() {
     );
   }
 
-  if (!isLoading && !isPaginating && groupNameDecoded !== "Unknown Group" && displayedChannelCards.length === 0 && hasPlaylistsConfigured && !searchTerm && allAggregatedBaseChannels.length === 0) {
+  if (!isLoading && !isPaginating && groupNameFromUrl !== "Unknown Group" && displayedChannelCards.length === 0 && hasPlaylistsConfigured && !searchTerm && allAggregatedBaseChannels.length === 0) {
      return (
       <div className="container mx-auto px-0 py-8 text-center">
-        <PageHeader title="Grupo Vazio ou Inválido" description={`O grupo de canais "${groupNameDecoded}" não contém canais ou não foi encontrado.`} />
+        <PageHeader title="Grupo Vazio ou Inválido" description={`O grupo de canais "${displayPageTitle}" não contém canais ou não foi encontrado.`} />
         <Button variant="outline" asChild className="mt-4">
           <Link href="/app/channels">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -229,13 +238,13 @@ export default function ChannelGroupPage() {
         </Button>
         <Input
           type="search"
-          placeholder={`Buscar em ${groupNameDecoded}...`}
+          placeholder={`Buscar em ${displayPageTitle}...`}
           className="w-full sm:w-auto sm:max-w-xs"
           value={searchTerm}
           onChange={handleSearchChange}
         />
       </div>
-      <PageHeader title={groupNameDecoded} description={`Explore os canais disponíveis em ${groupNameDecoded}.`} />
+      <PageHeader title={displayPageTitle} description={`Explore os canais disponíveis em ${displayPageTitle}.`} />
       {hasPlaylistsConfigured ? (
         (displayedChannelCards.length > 0 || isLoading || isPaginating) ? (
             <ContentGrid
@@ -246,12 +255,12 @@ export default function ChannelGroupPage() {
             hasMore={hasMore}
             />
         ) : (
-             !isLoading && !isPaginating && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado para "{searchTerm}" no grupo "{groupNameDecoded}".</p>
+             !isLoading && !isPaginating && searchTerm && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado para "{searchTerm}" no grupo "{displayPageTitle}".</p>
         ) || (
-             !isLoading && !isPaginating && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado para o grupo "{groupNameDecoded}" nas suas playlists.</p>
+             !isLoading && !isPaginating && <p className="text-muted-foreground text-center py-8">Nenhum canal encontrado para o grupo "{displayPageTitle}" nas suas playlists.</p>
         )
       ) : (
-         <PlaceholderContent type="canais" message={`Nenhuma playlist configurada ou nenhum canal de ${groupNameDecoded} encontrado.`}/>
+         <PlaceholderContent type="canais" message={`Nenhuma playlist configurada ou nenhum canal de ${displayPageTitle} encontrado.`}/>
       )}
        {(isPaginating && displayedChannelCards.length > 0) && (
         <p className="text-muted-foreground text-center py-8">Carregando mais canais...</p>
