@@ -127,12 +127,12 @@ export interface ContentItemForCard {
   seriesId?: string; // Deve ser o SeriesItem.id para navegação
 }
 
-// Interface para o que o VideoPlayer espera (adaptado do exemplo do usuário)
+// Interface para o que o VideoPlayer espera
 export interface MediaItemForPlayer {
-  id: string | number; // ID único do item (pode ser ChannelItem.baseChannelName, MovieItem.id, EpisodeItem.id)
-  streamUrl: string;
-  title: string;
-  type: 'channel' | 'movie' | 'series_episode'; // 'series' foi mudado para 'series_episode' para ser mais específico
+  id: string | number;
+  streamUrl: string | null;
+  title?: string;
+  type?: 'channel' | 'movie' | 'series_episode';
   posterUrl?: string;
 }
 
@@ -206,10 +206,10 @@ export const EPISODES_STORE = 'episodes';
 
 export const LEGACY_PLAYLIST_ITEMS_STORE = 'playlistItems';
 
-export const FILE_PLAYLIST_ITEM_LIMIT = 5000; 
+// Set to a very large number to effectively remove the limit for M3U file processing.
+// Browser/system memory will be the practical limit.
+export const FILE_PLAYLIST_ITEM_LIMIT = Number.MAX_SAFE_INTEGER; 
 
 // Auto-refresh settings
 export const REFRESH_INTERVAL_MINUTES = 60; 
 export const REFRESH_APP_OPEN_TRIGGER_COUNT = 3;
-
-    

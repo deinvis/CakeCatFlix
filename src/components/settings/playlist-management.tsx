@@ -328,7 +328,7 @@ export function PlaylistManagement() {
         <CardTitle className="flex items-center gap-2">
             <ListChecks className="h-6 w-6 text-primary" /> Gerenciamento de Playlists
         </CardTitle>
-        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador. Máximo de {FILE_PLAYLIST_ITEM_LIMIT} itens por playlist.</CardDescription>
+        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador. O processamento completo pode levar um tempo para listas muito grandes.</CardDescription>
       </CardHeader>
       <CardContent>
         <Dialog onOpenChange={(open) => { if(!open && !isLoading) resetAddPlaylistForms(); }}>
@@ -367,7 +367,6 @@ export function PlaylistManagement() {
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setNewPlaylistFile(e.target.files ? e.target.files[0] : null)} 
                     disabled={isLoading}
                   />
-                  <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens do arquivo.</p>
                 </div>
                 <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
@@ -385,7 +384,7 @@ export function PlaylistManagement() {
                     placeholder="https://exemplo.com/playlist.m3u" 
                     disabled={isLoading}
                   />
-                   <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens da URL. O conteúdo será buscado através de um proxy do servidor para evitar problemas de CORS.</p>
+                   <p className="text-xs text-muted-foreground">O conteúdo será buscado através de um proxy do servidor para evitar problemas de CORS.</p>
                 </div>
                  <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
@@ -406,7 +405,6 @@ export function PlaylistManagement() {
                     <Label htmlFor="xtream-pass">Senha</Label>
                     <Input id="xtream-pass" type="password" value={xtreamPassword} onChange={e => setXtreamPassword(e.target.value)} placeholder="sua_senha" disabled={isLoading} />
                   </div>
-                   <p className="text-xs text-muted-foreground">Busca canais, filmes e séries. Limite de {FILE_PLAYLIST_ITEM_LIMIT} itens no total.</p>
                 </div>
                 <DialogFooter>
                   <DialogClose asChild data-radix-dialog-close="true"><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
