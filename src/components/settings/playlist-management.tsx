@@ -129,12 +129,12 @@ export function PlaylistManagement() {
         metadataBase.name = nameToAdd;
         metadataBase.sourceDetails = sourceDetails;
         metadataBase.status = 'processing';
-        // Save initial metadata so it appears in the list as "processing"
+        
         await updatePlaylistMetadata(metadataBase).catch(e => console.warn("Could not save initial metadata for file:", e));
-        await fetchPlaylists(); // Refresh list to show processing item
+        await fetchPlaylists(); 
         
         const fileContent = await newPlaylistFile.text();
-        itemsToAdd = parseM3U(fileContent, playlistId); 
+        itemsToAdd = parseM3U(fileContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
 
       } else if (type === 'url') {
         setLoadingMessage('Buscando e processando URL M3U...');
@@ -157,10 +157,16 @@ export function PlaylistManagement() {
         
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ error: "Falha ao buscar URL. Resposta não JSON."}));
-          throw new Error(errorData.error || `Falha ao buscar URL via proxy: ${response.status} ${response.statusText}.`);
+          let errorMessage = errorData.error || `Falha ao buscar URL via proxy: ${response.status} ${response.statusText}.`;
+           if (response.status === 403) {
+            errorMessage += " O acesso foi proibido (403).";
+          } else if (response.status === 404) {
+            errorMessage += " A URL não foi encontrada (404)."
+          }
+          throw new Error(errorMessage);
         }
         const urlContent = await response.text();
-        itemsToAdd = parseM3U(urlContent, playlistId); 
+        itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT); 
 
       } else if (type === 'xtream') {
         setLoadingMessage('Conectando e buscando itens do Xtream Codes...');
@@ -173,7 +179,6 @@ export function PlaylistManagement() {
         const user = xtreamUser.trim();
         const pass = xtreamPassword.trim();
         sourceDetails = { type: 'xtream', host, username: user, password: pass };
-        // Attempt to derive a more user-friendly name from the host if no custom name is given
         const hostDomain = host.split('//')[1]?.split(':')[0] || host.split(':')[0] || 'Xtream Source';
         nameToAdd = nameToAdd || `Xtream: ${hostDomain}`;
         metadataBase.name = nameToAdd;
@@ -185,29 +190,28 @@ export function PlaylistManagement() {
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, host, user, pass); 
       }
 
-      metadataBase.name = nameToAdd; // Ensure final name is set
-      await addPlaylistWithItems(metadataBase, itemsToAdd); // This will update counts and status
+      metadataBase.name = nameToAdd; 
+      await addPlaylistWithItems(metadataBase, itemsToAdd); 
       
       toast({
         title: `Playlist Adicionada (${type.toUpperCase()})`,
-        description: `"${nameToAdd}" foi processada. Total de ${itemsToAdd.length} itens brutos, verifique as contagens detalhadas.`,
+        description: `"${nameToAdd}" foi processada. Total de ${itemsToAdd.length} itens brutos.`,
       });
 
-      await fetchPlaylists(); // Fetch again to get final counts and status
+      await fetchPlaylists(); 
       resetAddPlaylistForms();
       const closeButton = document.querySelector('[data-radix-dialog-close="true"]') as HTMLElement | null;
       if (closeButton) closeButton.click();
 
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
-        // Update metadata to failed status
         const failedMetadata: PlaylistMetadata = { 
             ...metadataBase,
-            name: nameToAdd || `Falha ao adicionar ${type}`, // Use determined name or a generic one
+            name: nameToAdd || `Falha ao adicionar ${type}`,
             status: 'failed' as 'failed', 
             statusMessage: error.message || "Erro desconhecido",
             lastUpdatedAt: Date.now(),
-            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, // Reset counts on failure
+            itemCount:0, channelCount:0, movieCount:0, seriesCount:0, episodeCount:0, 
         };
         await updatePlaylistMetadata(failedMetadata).catch(e => console.error("Failed to update metadata on error:", e));
 
@@ -221,7 +225,7 @@ export function PlaylistManagement() {
             variant: "destructive",
             duration: 7000 
         });
-        await fetchPlaylists(); // Refresh list to show failed status
+        await fetchPlaylists(); 
     } finally {
         setIsLoading(false);
     }
@@ -242,7 +246,7 @@ export function PlaylistManagement() {
           description: `"${playlistToDelete.name}" foi removida.`,
         });
         setPlaylistToDelete(null);
-        await fetchPlaylists(); // Refresh list
+        await fetchPlaylists(); 
       } catch (error: any) {
         console.error("Error deleting playlist:", error);
         toast({ title: "Erro ao Apagar", description: error.message, variant: "destructive" });
@@ -267,13 +271,13 @@ export function PlaylistManagement() {
             name: editPlaylistName.trim(),
             lastUpdatedAt: Date.now(), 
         };
-        await updatePlaylistMetadata(updatedPlaylistData); // updatePlaylistMetadata should update all relevant fields
+        await updatePlaylistMetadata(updatedPlaylistData); 
         toast({
           title: "Playlist Atualizada",
           description: `"${updatedPlaylistData.name}" foi atualizada.`,
         });
-        setEditingPlaylist(null); // Close dialog / reset state
-        await fetchPlaylists(); // Refresh list
+        setEditingPlaylist(null); 
+        await fetchPlaylists(); 
       } catch (error: any) {
         console.error("Error updating playlist:", error);
         toast({ title: "Erro ao Atualizar", description: error.message, variant: "destructive" });
@@ -290,16 +294,14 @@ export function PlaylistManagement() {
     setLoadingMessage('Limpando todos os dados...');
     try {
       await clearAllAppData();
-      // Clear relevant localStorage keys
       const appStorageKeys = [
         LOCALSTORAGE_STARTUP_PAGE_KEY,
         LOCALSTORAGE_THEME_KEY,
         LOCALSTORAGE_PARENTAL_CONTROL_KEY,
-        // Add other app-specific localStorage keys if any
       ];
       appStorageKeys.forEach(key => localStorage.removeItem(key));
       
-      setPlaylists([]); // Clear local state
+      setPlaylists([]); 
       
       toast({
         title: "Dados da Aplicação Apagados",
@@ -333,7 +335,7 @@ export function PlaylistManagement() {
         <CardTitle className="flex items-center gap-2">
             <ListChecks className="h-6 w-6 text-primary" /> Gerenciamento de Playlists
         </CardTitle>
-        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador. O processamento completo pode levar um tempo para listas muito grandes.</CardDescription>
+        <CardDescription>Adicione, edite ou apague suas playlists. Playlists e seus itens são salvos no banco de dados local do navegador.</CardDescription>
       </CardHeader>
       <CardContent>
         <Dialog onOpenChange={(open) => { if(!open && !isLoading) resetAddPlaylistForms(); }}>
