@@ -1,7 +1,6 @@
 
 import { DB_NAME, DB_VERSION, PLAYLIST_METADATA_STORE, PLAYLIST_ITEMS_STORE } from '@/lib/constants';
-import type { PlaylistItem, PlaylistMetadata } from '@/lib/constants'; // Updated types
-import { parseM3U } from './m3u-parser'; // Assuming m3u-parser handles the new detailed parsing
+import type { PlaylistItem, PlaylistMetadata } from '@/lib/constants'; 
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -12,74 +11,64 @@ function getDb(): Promise<IDBDatabase> {
         console.warn("IndexedDB accessed in a non-browser environment.");
         return reject(new Error("IndexedDB not available."));
       }
-      const request = indexedDB.open(DB_NAME, DB_VERSION); // DB_VERSION might need incrementing
+      const request = indexedDB.open(DB_NAME, DB_VERSION); 
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
+        const oldVersion = event.oldVersion;
         
         // Playlist Metadata Store
         if (!db.objectStoreNames.contains(PLAYLIST_METADATA_STORE)) {
           db.createObjectStore(PLAYLIST_METADATA_STORE, { keyPath: 'id' });
-        } else {
-          // If store exists, can add new indices or clear and recreate if schema changes drastically
-          // For simplicity, if major changes, typically version bump handles this.
-          // Minor changes like adding optional fields to PlaylistMetadata don't require store recreation.
         }
 
         // Playlist Items Store
+        let itemStore: IDBObjectStore;
         if (!db.objectStoreNames.contains(PLAYLIST_ITEMS_STORE)) {
-          const itemStore = db.createObjectStore(PLAYLIST_ITEMS_STORE, { autoIncrement: true, keyPath: 'id' });
-          // Indices based on new PlaylistItem structure and query needs
-          itemStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false }); // Foreign key
-          itemStore.createIndex('itemType_idx', 'itemType', { unique: false });
-          itemStore.createIndex('title_idx', 'title', { unique: false }); // For searching/sorting by original title
-          itemStore.createIndex('groupTitle_idx', 'groupTitle', { unique: false }); // For normalized group/genre
-          itemStore.createIndex('seriesTitle_idx', 'seriesTitle', { unique: false }); // For series aggregation
-          itemStore.createIndex('baseChannelName_idx', 'baseChannelName', { unique: false }); // For channel aggregation
-          
-          // Compound indices for common queries
-          itemStore.createIndex('playlist_itemType_idx', ['playlistDbId', 'itemType'], { unique: false });
-          itemStore.createIndex('playlist_groupTitle_idx', ['playlistDbId', 'groupTitle'], { unique: false });
-          itemStore.createIndex('playlist_seriesTitle_idx', ['playlistDbId', 'seriesTitle', 'seasonNumber', 'episodeNumber'], { unique: false });
-          itemStore.createIndex('playlist_baseChannelName_idx', ['playlistDbId', 'baseChannelName'], { unique: false });
-
+          itemStore = db.createObjectStore(PLAYLIST_ITEMS_STORE, { autoIncrement: true, keyPath: 'id' });
         } else {
-           // If store exists, handle potential index additions or modifications
-           // This is crucial when DB_VERSION is incremented.
-           const transaction = (event.target as IDBOpenDBRequest).transaction;
-           if (transaction) {
-                const itemStore = transaction.objectStore(PLAYLIST_ITEMS_STORE);
-                if (!itemStore.indexNames.contains('playlistDbId_idx')) {
-                    itemStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('itemType_idx')) {
-                    itemStore.createIndex('itemType_idx', 'itemType', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('title_idx')) {
-                     itemStore.createIndex('title_idx', 'title', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('groupTitle_idx')) {
-                    itemStore.createIndex('groupTitle_idx', 'groupTitle', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('seriesTitle_idx')) {
-                    itemStore.createIndex('seriesTitle_idx', 'seriesTitle', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('baseChannelName_idx')) {
-                    itemStore.createIndex('baseChannelName_idx', 'baseChannelName', { unique: false });
-                }
-                if (!itemStore.indexNames.contains('playlist_itemType_idx')) {
-                    itemStore.createIndex('playlist_itemType_idx', ['playlistDbId', 'itemType'], { unique: false });
-                }
-                if (!itemStore.indexNames.contains('playlist_groupTitle_idx')) {
-                    itemStore.createIndex('playlist_groupTitle_idx', ['playlistDbId', 'groupTitle'], { unique: false });
-                }
-                if (!itemStore.indexNames.contains('playlist_seriesTitle_idx')) {
-                     itemStore.createIndex('playlist_seriesTitle_idx', ['playlistDbId', 'seriesTitle', 'seasonNumber', 'episodeNumber'], { unique: false });
-                }
-                if (!itemStore.indexNames.contains('playlist_baseChannelName_idx')) {
-                     itemStore.createIndex('playlist_baseChannelName_idx', ['playlistDbId', 'baseChannelName'], { unique: false });
-                }
-           }
+          itemStore = (event.target as IDBOpenDBRequest).transaction!.objectStore(PLAYLIST_ITEMS_STORE);
+        }
+        
+        // Create indices if they don't exist or if upgrading from an older version
+        // where they might not have existed.
+        if (!itemStore.indexNames.contains('playlistDbId_idx')) {
+            itemStore.createIndex('playlistDbId_idx', 'playlistDbId', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('itemType_idx')) {
+            itemStore.createIndex('itemType_idx', 'itemType', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('title_idx')) {
+              itemStore.createIndex('title_idx', 'title', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('groupTitle_idx')) {
+            itemStore.createIndex('groupTitle_idx', 'groupTitle', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('seriesTitle_idx')) {
+            itemStore.createIndex('seriesTitle_idx', 'seriesTitle', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('baseChannelName_idx')) {
+            itemStore.createIndex('baseChannelName_idx', 'baseChannelName', { unique: false });
+        }
+        if (!itemStore.indexNames.contains('year_idx')) { // New index for year
+            itemStore.createIndex('year_idx', 'year', { unique: false });
+        }
+        
+        // Compound indices
+        if (!itemStore.indexNames.contains('playlist_itemType_idx')) {
+            itemStore.createIndex('playlist_itemType_idx', ['playlistDbId', 'itemType'], { unique: false });
+        }
+        if (!itemStore.indexNames.contains('playlist_groupTitle_idx')) {
+            itemStore.createIndex('playlist_groupTitle_idx', ['playlistDbId', 'groupTitle'], { unique: false });
+        }
+        if (!itemStore.indexNames.contains('playlist_seriesTitle_idx')) {
+              itemStore.createIndex('playlist_seriesTitle_idx', ['playlistDbId', 'seriesTitle', 'seasonNumber', 'episodeNumber'], { unique: false });
+        }
+        if (!itemStore.indexNames.contains('playlist_baseChannelName_idx')) {
+              itemStore.createIndex('playlist_baseChannelName_idx', ['playlistDbId', 'baseChannelName'], { unique: false });
+        }
+        if (!itemStore.indexNames.contains('playlist_itemType_genre_idx')) { // For querying by type and genre
+            itemStore.createIndex('playlist_itemType_genre_idx', ['playlistDbId', 'itemType', 'genre'], { unique: false });
         }
       };
 
@@ -130,8 +119,8 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
     metadata.channelCount = channelCount;
     metadata.movieCount = movieCount;
     metadata.seriesEpisodeCount = seriesEpisodeCount;
-    metadata.seriesCount = seriesTitles.size; // Count of unique series titles
-    metadata.status = 'completed'; // Assuming processing happens before this call or is synchronous
+    metadata.seriesCount = seriesTitles.size; 
+    metadata.status = 'completed'; 
     metadata.lastUpdatedAt = Date.now();
     metadata.lastSuccessfulUpdateAt = Date.now();
     
@@ -139,10 +128,10 @@ export async function addPlaylistWithItems(metadata: PlaylistMetadata, items: Pl
     metaRequest.onerror = () => reject(transaction.error || new Error("Failed to add playlist metadata."));
 
     for (const item of items) {
-      if (!item.playlistDbId) { // Ensure link to playlist
+      if (!item.playlistDbId) { 
         item.playlistDbId = metadata.id;
       }
-      const itemRequest = itemsStore.add(item); // `add` is fine for new items
+      const itemRequest = itemsStore.add(item); 
       itemRequest.onerror = () => reject(transaction.error || new Error("Failed to add playlist item."));
     }
     
@@ -212,7 +201,6 @@ export async function deletePlaylistAndItems(playlistId: string): Promise<void> 
   });
 }
 
-// Renamed from PlaylistItemCore to PlaylistItem
 export async function getPlaylistItems(
   playlistDbId: string, 
   itemType?: PlaylistItem['itemType'],
@@ -223,13 +211,12 @@ export async function getPlaylistItems(
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readonly');
     const store = transaction.objectStore(PLAYLIST_ITEMS_STORE);
-    // Use the compound index if itemType is provided
     const indexName = itemType ? 'playlist_itemType_idx' : 'playlistDbId_idx';
     const index = store.index(indexName);
     const range = itemType ? IDBKeyRange.only([playlistDbId, itemType]) : IDBKeyRange.only(playlistDbId);
     
     const items: PlaylistItem[] = [];
-    let advanced = false; // To ensure advance is only called once
+    let advanced = false; 
 
     const request = index.openCursor(range);
     let currentIndex = 0;
@@ -258,21 +245,33 @@ export async function getPlaylistItems(
   });
 }
 
-// Renamed from PlaylistItemCore to PlaylistItem
 export async function getPlaylistItemsByGroup(
   playlistDbId: string,
-  groupTitle: string, // This should be the normalized groupTitle
+  groupTitle: string, 
   limit?: number,
   offset?: number,
-  itemType?: PlaylistItem['itemType'] // Optional: to further filter by item type within a group
+  itemType?: PlaylistItem['itemType'] 
 ): Promise<PlaylistItem[]> {
   const db = await getDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readonly');
     const store = transaction.objectStore(PLAYLIST_ITEMS_STORE);
-    // Use the compound index for playlist and groupTitle
-    const index = store.index('playlist_groupTitle_idx'); 
-    const range = IDBKeyRange.only([playlistDbId, groupTitle]);
+    // Index for [playlistDbId, groupTitle] or more specific [playlistDbId, itemType, genre]
+    // For now, using playlist_groupTitle_idx and filtering itemType client-side if provided
+    // Ideally, a compound index like ['playlistDbId', 'itemType', 'groupTitle'] would be best if this is a common query.
+    // Let's use 'playlist_itemType_genre_idx' if itemType and groupTitle (as genre) are provided.
+    
+    let index: IDBIndex;
+    let range: IDBKeyRange;
+
+    if (itemType) {
+        index = store.index('playlist_itemType_genre_idx');
+        range = IDBKeyRange.only([playlistDbId, itemType, groupTitle]);
+    } else {
+        // Fallback if itemType is not specified, might be less efficient or require different handling
+        index = store.index('playlist_groupTitle_idx');
+        range = IDBKeyRange.only([playlistDbId, groupTitle]);
+    }
 
     const items: PlaylistItem[] = [];
     let advanced = false;
@@ -290,12 +289,12 @@ export async function getPlaylistItemsByGroup(
         }
         
         const item = cursor.value as PlaylistItem;
-        // If itemType is specified, perform an additional client-side filter
-        // This is because the index is only on [playlistDbId, groupTitle]
-        if (itemType && item.itemType !== itemType) {
-          cursor.continue();
-          return;
+        // If itemType was not part of the index query, filter it here
+        if (!itemType && item.groupTitle !== groupTitle) { // Ensure groupTitle matches if itemType wasn't in index key
+             cursor.continue();
+             return;
         }
+
 
         if (limit && items.length >= limit) {
           resolve(items);
@@ -331,7 +330,6 @@ export async function clearAllAppData(): Promise<void> {
   });
 }
 
-// Renamed from PlaylistItemCore to PlaylistItem
 export async function countPlaylistItems(playlistDbId: string, itemType?: PlaylistItem['itemType']): Promise<number> {
   const db = await getDb();
   return new Promise((resolve, reject) => {
@@ -346,13 +344,11 @@ export async function countPlaylistItems(playlistDbId: string, itemType?: Playli
   });
 }
 
-// Renamed from PlaylistItemCore to PlaylistItem
 export async function getAllUniqueGroupTitlesForPlaylist(playlistDbId: string, itemType: PlaylistItem['itemType']): Promise<string[]> {
     const db = await getDb();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(PLAYLIST_ITEMS_STORE, 'readonly');
         const store = transaction.objectStore(PLAYLIST_ITEMS_STORE);
-        // Use the compound index for playlist and itemType
         const index = store.index('playlist_itemType_idx'); 
         const range = IDBKeyRange.only([playlistDbId, itemType]);
         
@@ -363,7 +359,7 @@ export async function getAllUniqueGroupTitlesForPlaylist(playlistDbId: string, i
             const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
             if (cursor) {
                 const item = cursor.value as PlaylistItem;
-                if (item.groupTitle) { // Use the normalized groupTitle
+                if (item.groupTitle) { 
                     groupTitles.add(item.groupTitle);
                 }
                 cursor.continue();
@@ -375,8 +371,6 @@ export async function getAllUniqueGroupTitlesForPlaylist(playlistDbId: string, i
     });
 }
 
-// Renamed from getAllGenresForPlaylist
-// Renamed from PlaylistItemCore to PlaylistItem
 export async function getAllGenresForPlaylist(playlistDbId: string, itemType: 'movie' | 'series_episode'): Promise<string[]> {
     return getAllUniqueGroupTitlesForPlaylist(playlistDbId, itemType);
 }

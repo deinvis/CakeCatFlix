@@ -46,6 +46,7 @@ export interface PlaylistItem {
   tvgName?: string; // Often the same as title, or a variation
 
   genre?: string; // Extracted/normalized genre, could be same as groupTitle or refined
+  year?: number; // Year of release, primarily for movies
 
   // Channel specific
   baseChannelName?: string; // e.g., "ESPN" from "ESPN FHD"
@@ -133,7 +134,7 @@ export const LOCALSTORAGE_LAST_REFRESH_ATTEMPT_KEY_PREFIX = 'catcakeflix_last_re
 
 // IndexedDB constants
 export const DB_NAME = 'CatCakeFlixDB'; 
-export const DB_VERSION = 2; 
+export const DB_VERSION = 3; // Incremented DB_VERSION
 export const PLAYLIST_METADATA_STORE = 'playlists';
 export const PLAYLIST_ITEMS_STORE = 'playlistItems';
 
