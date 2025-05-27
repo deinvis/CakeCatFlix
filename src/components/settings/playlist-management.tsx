@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from '@/components/ui/separator';
 import { parseM3U } from '@/lib/m3u-parser';
-import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; // Import the new parser
+import { fetchXtreamPlaylistItems } from '@/lib/xtream-parser'; 
 import { 
   addPlaylistWithItems, 
   getAllPlaylistsMetadata, 
@@ -129,21 +129,27 @@ export function PlaylistManagement() {
         });
 
       } else if (type === 'url') {
-        setLoadingMessage('Adicionando playlist de URL...');
-        if (!newPlaylistUrl) {
+        setLoadingMessage('Buscando e processando URL M3U...');
+        if (!newPlaylistUrl.trim()) {
           toast({ title: "Erro", description: "Insira a URL da playlist.", variant: "destructive" });
           setIsLoading(false);
           return;
         }
-        nameToAdd = nameToAdd || `URL Playlist ${new Date().toLocaleTimeString()}`;
-        sourceValue = newPlaylistUrl; // Store URL as sourceValue
+        sourceValue = newPlaylistUrl.trim();
+        nameToAdd = nameToAdd || `URL: ${sourceValue.substring(0,30)}${sourceValue.length > 30 ? '...' : ''}`;
         metadataBase.name = nameToAdd;
-        // TODO: Fetch and parse URL content. For now, adds 0 items.
-        itemsToAdd = []; 
+        
+        const response = await fetch(sourceValue);
+        if (!response.ok) {
+          throw new Error(`Falha ao buscar URL: ${response.status} ${response.statusText}. Verifique a URL e as permissões CORS.`);
+        }
+        const urlContent = await response.text();
+        itemsToAdd = parseM3U(urlContent, playlistId, FILE_PLAYLIST_ITEM_LIMIT);
+        
         await addPlaylistWithItems({ ...metadataBase, sourceValue }, itemsToAdd);
         toast({
           title: "Playlist Adicionada (URL)",
-          description: `"${nameToAdd}" foi adicionada. O processamento do conteúdo da URL não está totalmente implementado neste protótipo.`,
+          description: `"${nameToAdd}" foi adicionada com ${itemsToAdd.length} itens.`,
         });
 
       } else if (type === 'xtream') {
@@ -158,14 +164,14 @@ export function PlaylistManagement() {
         sourceValue = xtreamHost; // Store host as sourceValue
         metadataBase.name = nameToAdd;
         metadataBase.xtreamUsername = xtreamUser;
-        metadataBase.xtreamPassword = xtreamPassword; // Storing for potential future re-fetch logic, BEWARE OF SECURITY
+        metadataBase.xtreamPassword = xtreamPassword; 
         
         itemsToAdd = await fetchXtreamPlaylistItems(playlistId, xtreamHost, xtreamUser, xtreamPassword);
         
         await addPlaylistWithItems({ 
           ...metadataBase, 
           sourceValue, 
-          xtreamUsername: xtreamUser, // Ensure these are passed
+          xtreamUsername: xtreamUser, 
           xtreamPassword: xtreamPassword 
         }, itemsToAdd);
 
@@ -177,7 +183,13 @@ export function PlaylistManagement() {
 
       await fetchPlaylists(); // Refresh list
       resetAddPlaylistForms();
-      // Dialog will be closed by DialogClose if successful
+      // Consider closing dialog only on success. This requires not using DialogClose asChild unconditionally.
+      // For now, we assume it closes. If an error occurs, the toast shows, dialog might still close.
+      // To prevent closing on error, DialogClose would need to be triggered manually.
+      const closeButton = document.querySelector('[data-radix-dialog-close]') as HTMLElement | null;
+      closeButton?.click();
+
+
     } catch (error: any) {
         console.error(`Error adding ${type} playlist:`, error);
         toast({ 
@@ -231,7 +243,7 @@ export function PlaylistManagement() {
             ...editingPlaylist, 
             name: editPlaylistName.trim(),
         };
-        await updatePlaylistMetadata(updatedPlaylistData); // updatePlaylistMetadata should preserve counts
+        await updatePlaylistMetadata(updatedPlaylistData); 
         toast({
           title: "Playlist Atualizada",
           description: `"${updatedPlaylistData.name}" foi atualizada.`,
@@ -338,7 +350,6 @@ export function PlaylistManagement() {
                 </div>
                 <DialogFooter>
                   <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
-                  {/* DialogClose needs to be conditional or outside if we want to keep dialog open on error */}
                   <Button type="button" onClick={() => handleAddNewPlaylist('file')} disabled={isLoading || !newPlaylistFile}>Adicionar do Arquivo</Button>
                 </DialogFooter>
               </TabsContent>
@@ -353,7 +364,7 @@ export function PlaylistManagement() {
                     placeholder="https://exemplo.com/playlist.m3u" 
                     disabled={isLoading}
                   />
-                   <p className="text-xs text-muted-foreground">O processamento de URLs remotas não está totalmente implementado.</p>
+                   <p className="text-xs text-muted-foreground">Serão processados os primeiros {FILE_PLAYLIST_ITEM_LIMIT} itens da URL. A URL deve permitir acesso direto (CORS habilitado).</p>
                 </div>
                  <DialogFooter>
                   <DialogClose asChild><Button type="button" variant="outline" disabled={isLoading}>Cancelar</Button></DialogClose>
@@ -382,6 +393,10 @@ export function PlaylistManagement() {
                 </DialogFooter>
               </TabsContent>
             </Tabs>
+            {/* Note: DialogClose is now part of each tab's footer. 
+                If an error occurs during handleAddNewPlaylist, the dialog might close.
+                For more robust error handling where dialog stays open, would need to manage open state manually.
+            */}
           </DialogContent>
         </Dialog>
 
@@ -517,3 +532,5 @@ export function PlaylistManagement() {
     </Card>
   );
 }
+
+    
