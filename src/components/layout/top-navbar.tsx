@@ -7,7 +7,7 @@ import { AppLogo } from '@/components/app-logo';
 import { NAV_LINKS, SETTINGS_NAV_LINK } from '@/lib/constants';
 import type { NavLink } from '@/lib/constants';
 import { cn } from '@/lib/utils';
-import { Menu, X, ChevronDown, Film, Tv2, Clapperboard, Settings } from 'lucide-react';
+import { Menu, X, ChevronDown } from 'lucide-react'; // Removed unused Film, Tv2, Clapperboard, Settings
 import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,10 +19,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getAllPlaylistsMetadata, getAllGenresForPlaylist } from '@/lib/db';
-import type { PlaylistMetadata } from '@/lib/db'; // Assuming PlaylistMetadata is exported from db.ts or constants.ts
 
 interface GenreOrGroup {
-  name: string;
+  name: string; // This should be the original, display-friendly name
   path: string;
 }
 
@@ -39,7 +38,7 @@ export function TopNavbar() {
 
   const fetchSubmenuData = useCallback(async () => {
     setIsLoadingSubmenus(true);
-    setHasPlaylistsConfigured(null);
+    setHasPlaylistsConfigured(null); // Reset while fetching
     try {
       const playlists = await getAllPlaylistsMetadata();
       if (playlists.length > 0 && playlists[0]?.id) {
@@ -47,6 +46,8 @@ export function TopNavbar() {
         setActivePlaylistId(currentPlaylistId);
         setHasPlaylistsConfigured(true);
 
+        // Fetch genres/groups for the first active playlist
+        // getAllGenresForPlaylist now returns original, de-duplicated, sorted names
         const [movies, series, channels] = await Promise.all([
           getAllGenresForPlaylist(currentPlaylistId, 'movie'),
           getAllGenresForPlaylist(currentPlaylistId, 'series'),
@@ -59,24 +60,26 @@ export function TopNavbar() {
         
       } else {
         setHasPlaylistsConfigured(false);
+        setActivePlaylistId(null); // Explicitly set to null
         setMovieGenres([]);
         setSeriesGenres([]);
         setChannelGroups([]);
       }
     } catch (error) {
       console.error("Error fetching submenu data:", error);
-      setHasPlaylistsConfigured(false);
+      setHasPlaylistsConfigured(false); // Assume no config on error
+      setActivePlaylistId(null);
       setMovieGenres([]);
       setSeriesGenres([]);
       setChannelGroups([]);
     } finally {
       setIsLoadingSubmenus(false);
     }
-  }, []);
+  }, []); // useCallback dependency array is empty as it doesn't depend on component scope props/state for its definition
 
   useEffect(() => {
     fetchSubmenuData();
-  }, [fetchSubmenuData]);
+  }, [fetchSubmenuData, pathname]); // Re-fetch when pathname changes or on initial mount
 
   useEffect(() => {
     // Close mobile menu on route change
@@ -85,31 +88,40 @@ export function TopNavbar() {
     }
   }, [pathname, isMobileMenuOpen]);
 
-  const mainNavLinks = NAV_LINKS.filter(link => link.href !== '/app/favoritos'); // Favoritos will be handled separately for now
+  // Favoritos link will be handled separately for now
+  const mainNavLinks = NAV_LINKS.filter(link => link.href !== '/app/favoritos'); 
   const favoritesLink = NAV_LINKS.find(link => link.href === '/app/favoritos');
 
   const renderNavLink = (link: NavLink, isMobile: boolean = false) => {
     const commonClasses = cn(
       "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
       isMobile ? "py-3 text-base gap-3" : "text-sm",
-      pathname === link.href ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent"
+      pathname === link.href || (link.href !== "/app" && pathname.startsWith(link.href)) 
+        ? "bg-primary text-primary-foreground hover:bg-primary/90" 
+        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
     );
 
     let subMenuContent: GenreOrGroup[] = [];
     let subMenuLabel = "";
+    let subMenuPathPrefix = "";
 
     if (link.href === "/app/movies") {
       subMenuContent = movieGenres;
       subMenuLabel = "Gêneros de Filmes";
+      subMenuPathPrefix = "/app/movies/genre/";
     } else if (link.href === "/app/series") {
       subMenuContent = seriesGenres;
       subMenuLabel = "Gêneros de Séries";
+      subMenuPathPrefix = "/app/series/genre/";
     } else if (link.href === "/app/channels") {
       subMenuContent = channelGroups;
       subMenuLabel = "Grupos de Canais";
+      subMenuPathPrefix = "/app/channels/group/";
     }
+    
+    const isActivePathForDropdown = pathname.startsWith(subMenuPathPrefix);
 
-    if (subMenuContent.length > 0 && !isMobile) { // Dropdowns only for desktop for now
+    if (subMenuContent.length > 0 && !isMobile && hasPlaylistsConfigured) { 
       return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -117,8 +129,8 @@ export function TopNavbar() {
               variant="ghost"
               className={cn(
                 commonClasses,
-                "hover:bg-accent hover:text-accent-foreground",
-                 pathname.startsWith(link.href) && link.href !== "/app" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                "hover:bg-primary/80", // Adjusted hover for dropdown trigger
+                 isActivePathForDropdown ? "bg-primary text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
               )}
             >
               <link.icon className={isMobile ? "h-5 w-5" : "h-4 w-4"} />
@@ -133,24 +145,20 @@ export function TopNavbar() {
               <DropdownMenuItem disabled>Carregando...</DropdownMenuItem>
             ) : (
               subMenuContent.map(item => (
-                <DropdownMenuItem key={item.path} asChild>
+                <DropdownMenuItem key={item.path} asChild
+                  className={cn(pathname === item.path ? "bg-accent text-accent-foreground" : "")}
+                >
                   <Link href={item.path} className="w-full">
                     {item.name}
                   </Link>
                 </DropdownMenuItem>
               ))
             )}
-            {hasPlaylistsConfigured === false && !isLoadingSubmenus && (
-                <DropdownMenuItem disabled>Nenhuma playlist configurada</DropdownMenuItem>
-            )}
-             {hasPlaylistsConfigured && !isLoadingSubmenus && subMenuContent.length === 0 && (
-                <DropdownMenuItem disabled>Nenhum {subMenuLabel.toLowerCase().replace("de ", "")} encontrado</DropdownMenuItem>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
       );
     }
-
+    // If no subMenu or isMobile or no playlists configured, render as plain link
     return (
       <Link href={link.href} className={commonClasses}>
         <link.icon className={isMobile ? "h-5 w-5" : "h-4 w-4"} />
@@ -169,7 +177,9 @@ export function TopNavbar() {
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 max-w-screen-2xl items-center">
         <div className="mr-4 hidden md:flex">
-          <AppLogo />
+          <Link href="/app" aria-label="Página Inicial">
+            <AppLogo />
+          </Link>
         </div>
 
         {/* Mobile Menu Trigger & Logo */}
@@ -179,12 +189,14 @@ export function TopNavbar() {
             size="icon"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="mr-2"
-            aria-label="Toggle mobile menu"
+            aria-label="Alternar menu móvel"
           >
             {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </Button>
           <div onClick={() => setIsMobileMenuOpen(false)}> {/* Close menu on logo click */}
-            <AppLogo />
+             <Link href="/app" aria-label="Página Inicial">
+                <AppLogo />
+            </Link>
           </div>
         </div>
 
@@ -198,8 +210,8 @@ export function TopNavbar() {
             <Link
               href={favoritesLink.href}
               className={cn(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                 pathname === favoritesLink.href ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                pathname === favoritesLink.href ? "bg-primary text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
               )}
             >
               <favoritesLink.icon className="h-4 w-4" />
@@ -212,8 +224,8 @@ export function TopNavbar() {
            <Link
               href={SETTINGS_NAV_LINK.href}
               className={cn(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                pathname === SETTINGS_NAV_LINK.href ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                pathname === SETTINGS_NAV_LINK.href ? "bg-primary text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
               )}
             >
               <SETTINGS_NAV_LINK.icon className="h-4 w-4" />
@@ -227,8 +239,6 @@ export function TopNavbar() {
         <div 
           className="absolute top-16 left-0 right-0 z-40 border-t border-border/40 bg-background shadow-lg md:hidden"
           onClick={(e) => {
-            // Close menu if clicking outside the actual link items (e.g. on the background of the drawer)
-            // This helps if the drawer takes full width.
             if (e.target === e.currentTarget) {
               setIsMobileMenuOpen(false);
             }
@@ -236,7 +246,7 @@ export function TopNavbar() {
         >
           <nav className="flex flex-col gap-1 p-4">
             {allLinksForMobile.map((link) => (
-              <div key={link.href} onClick={() => setIsMobileMenuOpen(false)}> {/* Close menu on link click */}
+              <div key={link.href} onClick={() => setIsMobileMenuOpen(false)}> 
                  {renderNavLink(link, true)}
               </div>
             ))}
