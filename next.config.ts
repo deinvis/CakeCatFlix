@@ -18,15 +18,15 @@ const nextConfig: NextConfig = {
         pathname: '/**',
       },
       {
-        protocol: 'https',
-        hostname: '**', // Allows any hostname over HTTPS
-        port: '',
+        protocol: 'http',
+        hostname: '**', // Allows any hostname over HTTP
+        port: '',       // Matches any port
         pathname: '/**',
       },
       {
-        protocol: 'http',
-        hostname: '**', // Allows any hostname over HTTP
-        port: '',
+        protocol: 'https',
+        hostname: '**', // Allows any hostname over HTTPS
+        port: '',       // Matches any port
         pathname: '/**',
       },
     ],
