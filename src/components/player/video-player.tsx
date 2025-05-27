@@ -6,10 +6,11 @@ import { Play, Pause, Volume2, Volume1, VolumeX, Maximize, Minimize, AlertTriang
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
 
 interface VideoPlayerProps {
-  src: string | null; // Modified to accept null
-  // posterUrl?: string; // Optional: if you want to use a poster
+  src: string | null;
 }
 
 const formatTime = (timeInSeconds: number): string => {
@@ -48,108 +49,163 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    if (videoRef.current && !videoRef.current.paused) {
+    // Only hide controls if video is playing and not loading/errored
+    if (videoRef.current && !videoRef.current.paused && !isLoading && !playerError) {
          controlsTimeoutRef.current = setTimeout(hideControls, 3000);
     }
-  }, [hideControls]);
+  }, [hideControls, isLoading, playerError]);
   
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !src) { // Do nothing if no video element or no src
+    if (!video || !src) {
       setIsLoading(false);
-      if (!src) setPlayerError("Nenhuma fonte de vídeo fornecida.");
+      setPlayerError(src ? null : "Nenhuma fonte de vídeo fornecida.");
+      // If src is null, ensure video element is reset
+      if (video && !src) {
+          video.removeAttribute('src');
+          try { video.load(); } catch(e) { /* ignore */ } // Resets the media element
+          setCurrentTime(0);
+          setDuration(0);
+          setIsPlaying(false);
+      }
       return;
     }
     
+    console.log("VideoPlayer: Setting up for new src:", src);
     setIsLoading(true);
     setPlayerError(null);
-    // When src changes, reset states
     setCurrentTime(0);
     setDuration(0);
-    setIsPlaying(false);
-
+    setIsPlaying(false); 
 
     const handlePlay = () => {
+      console.log("VideoPlayer: Event 'play' for", src);
       setIsPlaying(true);
       setIsLoading(false); // Stop loading once play starts
-      setPlayerError(null); // Clear any previous error
+      setPlayerError(null);
     };
-    const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => setIsPlaying(false);
-    const handleTimeUpdate = () => setCurrentTime(video.currentTime);
+    const handlePause = () => {
+      console.log("VideoPlayer: Event 'pause' for", src);
+      setIsPlaying(false);
+    };
+    const handleEnded = () => {
+      console.log("VideoPlayer: Event 'ended' for", src);
+      setIsPlaying(false);
+    };
+    const handleTimeUpdate = () => {
+      if (video) setCurrentTime(video.currentTime);
+    };
     const handleLoadedMetadata = () => {
-      setDuration(video.duration);
-      setVolume(video.volume);
-      setIsMuted(video.muted);
+      console.log("VideoPlayer: Event 'loadedmetadata' for", src);
+      if(video) {
+        setDuration(video.duration);
+        setVolume(video.volume);
+        setIsMuted(video.muted);
+      }
       setIsLoading(false);
+      setPlayerError(null); // Clear error if metadata loads successfully
     };
-    const handleVolumeChange = () => {
-      if (video){ // Ensure video still exists
+    const handleVolumeChangeHandler = () => { // Renamed to avoid conflict with outer scope handleVolumeChange
+      if(video) {
         setVolume(video.volume);
         setIsMuted(video.muted);
       }
     };
-    const handleWaiting = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
-    const handleError = (e: Event) => {
-        setIsLoading(false);
-        const videoElement = e.target as HTMLVideoElement;
-        let message = "Ocorreu um erro ao tentar reproduzir o vídeo.";
-        if (videoElement.error) {
-            switch (videoElement.error.code) {
-                case MediaError.MEDIA_ERR_ABORTED:
-                    message = "A reprodução do vídeo foi abortada.";
-                    break;
-                case MediaError.MEDIA_ERR_NETWORK:
-                    message = "Erro de rede ao carregar o vídeo. Verifique sua conexão.";
-                    break;
-                case MediaError.MEDIA_ERR_DECODE:
-                    message = "Erro ao decodificar o vídeo. O arquivo pode estar corrompido ou em formato não suportado.";
-                    break;
-                case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-                    message = "Formato de vídeo não suportado ou fonte inválida. Verifique o console do navegador para erros de CORS ou rede.";
-                    break;
-                default:
-                    message = `Erro desconhecido no vídeo (código: ${videoElement.error.code}).`;
-            }
-        } else if (!src) {
-            message = "Nenhuma fonte de vídeo fornecida."
-        }
-        console.error("Video Player Error:", videoElement.error, "Source URL:", src);
-        setPlayerError(message);
+    const handleWaiting = () => {
+      console.log("VideoPlayer: Event 'waiting' (buffering) for", src);
+      if (!playerError) setIsLoading(true); // Only show loading if no error
+    };
+    const handlePlaying = () => { // Added handler for 'playing' event
+      console.log("VideoPlayer: Event 'playing' (resumed after buffer/seek) for", src);
+      setIsLoading(false);
+      setIsPlaying(true); // Ensure playing state is true
+      setPlayerError(null); // Clear error if playing starts/resumes
+    };
+    const handleCanPlay = () => {
+      console.log("VideoPlayer: Event 'canplay' for", src);
+      setIsLoading(false); // Ready to play, hide spinner
     };
 
+    const handleError = (e: Event) => {
+        setIsLoading(false);
+        setIsPlaying(false); // Stop trying to play on error
+        const videoElement = e.target as HTMLVideoElement;
+        let message = "Ocorreu um erro ao tentar reproduzir o vídeo.";
+
+        if (videoElement.error) {
+            const error = videoElement.error;
+            // Check for empty error object, common with CORS issues for MP4
+            if (typeof error === 'object' && error !== null && Object.keys(error).length === 0 && !error.code && src && src.toLowerCase().endsWith('.mp4')) {
+                message = "Não foi possível carregar o vídeo MP4. Isso pode ser devido a restrições de CORS no servidor de vídeo ou o arquivo pode não estar acessível. Verifique o console do navegador (Ctrl+Shift+J ou Cmd+Opt+J) para mais detalhes e tente abrir a URL do vídeo diretamente em outra aba.";
+            } else {
+                switch (error.code) {
+                    case MediaError.MEDIA_ERR_ABORTED: // Code 1
+                        message = "A reprodução do vídeo foi abortada pelo usuário.";
+                        break;
+                    case MediaError.MEDIA_ERR_NETWORK: // Code 2
+                        message = "Erro de rede ao carregar o vídeo. Verifique sua conexão à internet.";
+                        break;
+                    case MediaError.MEDIA_ERR_DECODE: // Code 3
+                        message = "Erro ao decodificar o vídeo. O arquivo pode estar corrompido ou em um formato não suportado pelo seu navegador.";
+                        break;
+                    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: // Code 4
+                        message = `Formato de vídeo não suportado ou fonte inválida. Isso pode ser um problema de CORS se a URL for externa. Verifique o console do navegador. (Código: ${error.code})`;
+                        break;
+                    default:
+                        message = `Ocorreu um erro desconhecido no vídeo (Código: ${error.code || 'não especificado'}). Tente novamente ou verifique a URL.`;
+                }
+            }
+        } else if (!src) { 
+            message = "Nenhuma fonte de vídeo fornecida.";
+        }
+        
+        console.error("Video Player Error (Debug Info):", { 
+            errorDetails: videoElement.error, 
+            errorCode: videoElement.error?.code,
+            errorMessageFromVideoElement: videoElement.error?.message,
+            sourceUrl: src 
+        });
+        setPlayerError(message);
+    };
+    
 
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('ended', handleEnded);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('volumechange', handleVolumeChange);
+    video.addEventListener('volumechange', handleVolumeChangeHandler);
     video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying); // Added playing event
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('error', handleError);
     
-    if (video.readyState >= 1) { // HAVE_METADATA
+    if (video.readyState >= 1 && video.duration) { // HAVE_METADATA and duration is known
         handleLoadedMetadata();
     }
-    // Attempt to play if src is valid and not already trying to play
-    // Autoplay might be blocked by browser policy, user might need to click
-    // video.play().catch(() => {
-    //   console.warn("Autoplay foi bloqueado ou falhou.");
-    // });
+
+    video.src = src;
+    try { video.load(); } catch(e) { console.warn("Video load() call failed:", e); } // Recommended after setting src
 
     return () => {
+      console.log("VideoPlayer: Cleaning up listeners for src:", src);
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('volumechange', handleVolumeChange);
+      video.removeEventListener('volumechange', handleVolumeChangeHandler);
       video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('error', handleError);
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      // Stop video and reset src to prevent playing in background on component unmount or src change
+      if (video && !video.paused) {
+          video.pause();
+      }
+      // Do not reset src here if the component might be re-rendered with the same src
+      // It's better handled at the start of the effect if src is truly different or null
     };
   }, [src]); // Re-run effect if src changes
 
@@ -159,36 +215,37 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
       playerElement.addEventListener('mousemove', resetControlsTimeout);
       playerElement.addEventListener('mouseleave', () => {
          if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-         controlsTimeoutRef.current = setTimeout(hideControls, 500);
+         controlsTimeoutRef.current = setTimeout(hideControls, 500); // Hide faster on mouse leave
       });
-      resetControlsTimeout();
+      resetControlsTimeout(); // Initial call to show controls
     }
     return () => {
       if (playerElement) {
         playerElement.removeEventListener('mousemove', resetControlsTimeout);
         playerElement.removeEventListener('mouseleave', () => { /* cleanup */ });
       }
+       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, [resetControlsTimeout, hideControls]);
 
+  // Effect to manage controls visibility based on playing state
   useEffect(() => {
-    if (isPlaying) {
-      resetControlsTimeout();
+    if (isPlaying && !playerError) {
+      resetControlsTimeout(); // Start timer to hide controls
     } else {
-      setShowControls(true);
+      setShowControls(true); // Keep controls visible if paused, ended, or error
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current);
       }
     }
-  }, [isPlaying, resetControlsTimeout]);
+  }, [isPlaying, playerError, resetControlsTimeout]);
 
   const togglePlayPause = () => {
     if (videoRef.current) {
       if (videoRef.current.paused || videoRef.current.ended) {
         videoRef.current.play().catch(err => {
-            console.error("Erro ao tentar play manual:", err);
-            setPlayerError("Não foi possível iniciar a reprodução.");
-            setIsLoading(false);
+            console.error("Error on manual play().catch:", err);
+            // setPlayerError might be set by the 'error' event already
         });
       } else {
         videoRef.current.pause();
@@ -197,32 +254,33 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
   };
 
   const handleSeek = (value: number[]) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = value[0];
-      setCurrentTime(value[0]);
+    if (videoRef.current && videoRef.current.duration) { // Ensure duration is available
+      const newTime = value[0];
+      if (isFinite(newTime)) { // Check if newTime is a finite number
+          videoRef.current.currentTime = newTime;
+          setCurrentTime(newTime);
+      }
     }
   };
 
-  const handleVolumeSliderChange = (value: number[]) => {
+  const handleVolumeSliderChange = (value: number[]) => { // Renamed from handleVolumeChange to avoid conflict
     if (videoRef.current) {
       const newVolume = value[0];
       videoRef.current.volume = newVolume;
-      // setVolume(newVolume); // volume state is updated by 'volumechange' event
+      // setVolume(newVolume); // state updated by 'volumechange' event
       videoRef.current.muted = newVolume === 0;
-      // setIsMuted(newVolume === 0); // muted state is updated by 'volumechange' event
+      // setIsMuted(newVolume === 0); // state updated by 'volumechange' event
     }
   };
 
   const toggleMute = () => {
     if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      // setIsMuted(!isMuted); // state updated by 'volumechange'
-      if (videoRef.current.muted && videoRef.current.volume === 0) { 
-        // If muting and volume is 0, it's already effectively muted.
-        // If unmuting and volume is 0, set to a default
-        // This case is tricky, handled better by 'volumechange' event
-      } else if (!videoRef.current.muted && videoRef.current.volume === 0) {
-         videoRef.current.volume = 0.5; // if unmuting and vol is 0, set to 0.5
+      const currentMutedState = videoRef.current.muted;
+      videoRef.current.muted = !currentMutedState;
+      // setIsMuted(!currentMutedState); // state updated by 'volumechange' event
+      if (!videoRef.current.muted && videoRef.current.volume === 0) { 
+        videoRef.current.volume = 0.5; // if unmuting and vol is 0, set to 0.5
+        // setVolume(0.5); // state updated by 'volumechange' event
       }
     }
   };
@@ -254,11 +312,12 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
 
   const VolumeIcon = isMuted || volume === 0 ? VolumeX : volume > 0.5 ? Volume2 : Volume1;
   
-  if (!src && !isLoading && !playerError) {
+  if (!src && !isLoading && !playerError) { // This condition is when src is null initially
     return (
-      <div ref={playerWrapperRef} className="w-full max-w-5xl mx-auto aspect-video relative rounded-lg overflow-hidden shadow-2xl bg-black group flex items-center justify-center text-muted-foreground">
+      <div ref={playerWrapperRef} className="w-full max-w-5xl mx-auto aspect-video relative rounded-lg overflow-hidden shadow-2xl bg-black group flex flex-col items-center justify-center text-muted-foreground p-4">
         <WifiOff className="w-12 h-12 mb-2" />
         <span>Nenhuma fonte de vídeo.</span>
+        <span className="text-xs mt-1">Selecione uma fonte para reproduzir.</span>
       </div>
     );
   }
@@ -268,15 +327,15 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
     <div ref={playerWrapperRef} className="w-full max-w-5xl mx-auto aspect-video relative rounded-lg overflow-hidden shadow-2xl bg-black group">
       <video
         ref={videoRef}
-        src={src || undefined} // Pass undefined if src is null to avoid <video src="null">
+        // src is set in useEffect
         className="w-full h-full object-contain"
         onClick={togglePlayPause}
         onDoubleClick={toggleFullScreen}
         playsInline
-        // poster={posterUrl} // Add if you re-introduce posterUrl prop
+        controls={false} // Use custom controls
         crossOrigin="anonymous" // Good practice for CORS, though server must still allow
       />
-      {(isLoading && !playerError) && (
+      {isLoading && !playerError && ( // Show loading spinner only if no error
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-20">
           <div className="w-12 h-12 border-4 border-background border-t-accent rounded-full animate-spin" title="Carregando..."></div>
         </div>
@@ -288,14 +347,14 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
           <p className="text-xs md:text-sm max-w-md">{playerError}</p>
         </div>
       )}
-      {src && !playerError && ( // Only show controls if there's a src and no error
+      {/* Controls div (conditionally shown) */}
+      {src && !playerError && ( /* Only show controls if src is valid and no error and not initial loading without duration */
         <div
           className={cn(
-            "absolute bottom-0 left-0 right-0 p-3 md:p-4 bg-gradient-to-t from-black/80 to-transparent transition-all duration-300 ease-in-out z-20", // Ensure controls are above video for clicks
+            "absolute bottom-0 left-0 right-0 p-3 md:p-4 bg-gradient-to-t from-black/80 to-transparent transition-all duration-300 ease-in-out z-20",
             (showControls || !isPlaying || isLoading) ? "opacity-100 translate-y-0" : "opacity-0 translate-y-full",
-            "group-hover:opacity-100 group-hover:translate-y-0" // Ensure hover on wrapper shows controls
+            "group-hover:opacity-100 group-hover:translate-y-0" 
           )}
-          // onClick={(e) => e.stopPropagation()} // Prevent clicks on controls from toggling play/pause on video
         >
           <div className="mb-2 px-1">
             <Slider
@@ -307,7 +366,7 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
               aria-label="Progresso do vídeo"
             />
           </div>
-          <div className="flex items-center justify-between text-white"> {/* Changed to text-white for better visibility on gradient */}
+          <div className="flex items-center justify-between text-white">
             <div className="flex items-center gap-2 md:gap-3">
               <Button variant="ghost" size="icon" onClick={togglePlayPause} className="text-white hover:bg-white/20 focus-visible:ring-white" aria-label={isPlaying ? "Pausar" : "Reproduzir"}>
                 {isPlaying ? <Pause className="w-5 h-5 md:w-6 md:h-6" /> : <Play className="w-5 h-5 md:w-6 md:h-6" />}
@@ -322,7 +381,7 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
                   step={0.01}
                   onValueChange={handleVolumeSliderChange}
                   aria-label="Volume"
-                  className="[&>span:first-child>span]:bg-white [&>span:last-child]:bg-white/50 [&>span:last-child]:border-white" // Style slider thumb and track for dark bg
+                  className="[&>span:first-child>span]:bg-white [&>span:last-child]:bg-white/50 [&>span:last-child]:border-white"
                 />
               </div>
             </div>
@@ -340,3 +399,4 @@ export function VideoPlayer({ src }: VideoPlayerProps) {
     </div>
   );
 }
+
