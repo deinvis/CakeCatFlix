@@ -315,39 +315,37 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
 
       let itemType: PlaylistItem['itemType'];
 
-      // 1. Definitive Channel indicators
-      if (lowerStreamUrl.endsWith('.ts') || 
-          normalizedTvgName.includes('24h') || // "24h" in tvg-name
-          (originalGroupTitle && normalizeText(originalGroupTitle).includes('canal'))) { // "canal" in group-title
-        itemType = 'channel';
-      }
-      // 2. Definitive Series indicator
-      else if (sxxExxPatternMatch) {
+      // 1. Series Check (Highest Priority)
+      if (sxxExxPatternMatch) {
         itemType = 'series_episode';
       }
-      // 3. Channel-like name check (even for .mp4 if not series)
-      else if (lowerStreamUrl.includes('.mp4') || lowerStreamUrl.includes('.mkv') || lowerStreamUrl.includes('.avi')) { // Common video extensions
-        const { baseChannelName, quality } = extractChannelDetails(titleForProcessing);
-        // Heuristic: if it has a clear quality indicator OR a short, all-caps name, it's likely a channel
-        const isLikelyChannelName = quality || (baseChannelName.length < 25 && baseChannelName === baseChannelName.toUpperCase() && !extractMovieYear(titleForProcessing));
-        
-        if (isLikelyChannelName) {
-            itemType = 'channel';
-        }
-        // 4. Group-title based for video files if not channel or series
-        else if (originalGroupTitle && normalizeText(originalGroupTitle).includes('serie')) {
-            itemType = 'series_episode';
-        } else if (originalGroupTitle && normalizeText(originalGroupTitle).includes('filme')) {
-            itemType = 'movie';
-        }
-        // 5. Fallback for video files
-        else {
-            itemType = extractMovieYear(titleForProcessing) ? 'movie' : 'movie'; // Default to movie for .mp4 if no other strong indicator
-        }
+      // 2. Channel Check (High Priority)
+      else if (lowerStreamUrl.endsWith('.ts') ||
+               normalizeText(titleForProcessing).includes('canais') || // "CANAIS" in title
+               (originalGroupTitle && normalizeText(originalGroupTitle).includes('canal')) || // "canal" in group-title
+               normalizedTvgName.includes('24h')) { // "24h" in tvg-name (kept from previous logic as a strong channel indicator)
+        itemType = 'channel';
       }
-      // 6. Default for other stream types (e.g. rtmp, http direct streams without clear extension)
+      // 3. Movie Check (Medium Priority - if .mp4 and not series/channel)
+      else if (lowerStreamUrl.endsWith('.mp4')) {
+          itemType = 'movie';
+      }
+      // 4. Secondary Series Check (Medium Priority - if group-title contains 'serie')
+      else if (originalGroupTitle && normalizeText(originalGroupTitle).includes('serie')) {
+          itemType = 'series_episode';
+      }
+       // 5. Secondary Movie Check (Medium Priority - if group-title contains 'filme')
+      else if (originalGroupTitle && normalizeText(originalGroupTitle).includes('filme')) {
+          itemType = 'movie';
+      }
+      // 6. Fallback for everything else (default to channel or guess based on file extension if any)
       else {
-        itemType = 'channel'; 
+         // Fallback based on common video extensions if not classified yet
+         if (lowerStreamUrl.endsWith('.mkv') || lowerStreamUrl.endsWith('.avi') || extractMovieYear(titleForProcessing)) {
+             itemType = 'movie';
+         } else {
+             itemType = 'channel'; // Default fallback
+         }
       }
 
       // If originalGroupTitle is missing, assign a default before normalization
@@ -358,7 +356,7 @@ export function parseM3U(m3uString: string, playlistDbId: string): PlaylistItem[
           case 'series_episode': originalGroupTitle = 'SÉRIES DIVERSAS'; break;
           default: originalGroupTitle = 'OUTROS';
         }
-      }
+      }      
       
       const item: Partial<PlaylistItem> = {
         playlistDbId,

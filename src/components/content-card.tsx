@@ -69,10 +69,12 @@ export function ContentCard({
               data-ai-hint={finalDataAiHint}
               onError={() => {
                 if (!imageError) { // Prevent infinite loop if placeholder also fails
+                  console.error(`Image failed to load: ${imageUrl}`);
                   setImageError(true);
                 }
               }}
               unoptimized={imageError || imageSrc === defaultPlaceholder} // If using placeholder, or original caused error, no need to optimize it
+              priority={true} // Add priority for images that might be LCP
             />
             <Badge variant="default" className="absolute top-2 left-2 text-xs shadow-md">
               <TypeIcon className="h-3 w-3 mr-1" />
