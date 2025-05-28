@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AppLogo } from '@/components/app-logo';
-import { NAV_LINKS, SETTINGS_NAV_LINK, STARTUP_PAGES } from '@/lib/constants'; // Added STARTUP_PAGES
+import { NAV_LINKS, SETTINGS_NAV_LINK, STARTUP_PAGES } from '@/lib/constants';
 import type { NavLink } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { Menu, X, ChevronDown } from 'lucide-react';
@@ -40,7 +40,8 @@ export function TopNavbar() {
 
   const fetchSubmenuData = useCallback(async () => {
     setIsLoadingSubmenus(true);
-    setHasPlaylistsConfigured(null);
+    // Do not reset hasPlaylistsConfigured here as it might cause flickering if already set
+    // setHasPlaylistsConfigured(null); 
     try {
       const playlists = await getAllPlaylistsMetadata();
       if (playlists.length > 0 && playlists[0]?.id) {
@@ -67,7 +68,7 @@ export function TopNavbar() {
       }
     } catch (error) {
       console.error("Error fetching submenu data:", error);
-      setHasPlaylistsConfigured(false);
+      setHasPlaylistsConfigured(false); // Set to false on error
       setActivePlaylistId(null);
       setMovieGenres([]);
       setSeriesGenres([]);
@@ -81,20 +82,24 @@ export function TopNavbar() {
     fetchSubmenuData();
   }, [fetchSubmenuData, pathname]); 
 
+  // Close mobile menu on pathname change
   useEffect(() => {
     if (isMobileMenuOpen) {
       setIsMobileMenuOpen(false);
     }
-  }, [pathname, isMobileMenuOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const mainNavLinks = NAV_LINKS.filter(link => link.href !== '/app/favoritos'); 
   const favoritesLink = NAV_LINKS.find(link => link.href === '/app/favoritos');
 
   const renderNavLink = (link: NavLink, isMobile: boolean = false) => {
+    const isActivePage = pathname === link.href || (link.href !== defaultAppHomePage && pathname.startsWith(link.href) && !link.exactMatch);
+    
     const commonClasses = cn(
-      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-      isMobile ? "py-3 text-base gap-3" : "text-sm",
-      pathname === link.href || (link.href !== defaultAppHomePage && pathname.startsWith(link.href)) 
+      "flex items-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      isMobile ? "py-3 text-base gap-3 w-full px-3 rounded-md" : "text-sm rounded-md",
+       isActivePage 
         ? "bg-primary text-primary-foreground hover:bg-primary/90" 
         : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
     );
@@ -117,25 +122,88 @@ export function TopNavbar() {
       subMenuPathPrefix = "/app/channels/group/";
     }
     
-    const isActivePathForDropdown = pathname.startsWith(subMenuPathPrefix);
+    const isDropdownPathActive = subMenuPathPrefix && pathname.startsWith(subMenuPathPrefix);
 
-    if (subMenuContent.length > 0 && !isMobile && hasPlaylistsConfigured) { 
+    if (subMenuContent.length > 0 && hasPlaylistsConfigured) { 
+      const linkPartClasses = cn(
+        "flex items-center gap-2 px-3 py-2 rounded-l-md",
+        commonClasses,
+        // Remove right padding if trigger is next to it
+        !isMobile ? "pr-2" : "" 
+      );
+      const triggerPartClasses = cn(
+        "px-2 py-2 rounded-r-md",
+        commonClasses,
+        // Remove left padding/border if link is next to it
+        !isMobile ? "pl-1 border-l border-transparent group-hover:border-primary/30" : "",
+        isActivePage && !isDropdownPathActive ? "border-l-primary-foreground/50" : (isDropdownPathActive ? "bg-primary text-primary-foreground hover:bg-primary/90 border-l-primary-foreground/50" : "group-hover:border-muted-foreground/30")
+      );
+       const mobileDropdownTriggerClasses = cn(
+        "flex items-center justify-between w-full px-3 py-3 text-base gap-3 rounded-md",
+        commonClasses
+      );
+
+
+      if (isMobile) {
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className={mobileDropdownTriggerClasses}>
+                <div className="flex items-center gap-3">
+                  <link.icon className="h-5 w-5" />
+                  {link.label}
+                </div>
+                <ChevronDown className="h-5 w-5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56 max-h-96 overflow-y-auto ml-4">
+              <DropdownMenuItem asChild className={cn(pathname === link.href ? "bg-accent text-accent-foreground" : "")}>
+                 <Link href={link.href} className="w-full">Ver Todos {link.label}</Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{subMenuLabel}</DropdownMenuLabel>
+              {isLoadingSubmenus ? (
+                <DropdownMenuItem disabled>Carregando...</DropdownMenuItem>
+              ) : (
+                subMenuContent.map(item => (
+                  <DropdownMenuItem key={item.path} asChild
+                    className={cn(pathname === item.path ? "bg-accent text-accent-foreground" : "")}
+                  >
+                    <Link href={item.path} className="w-full">
+                      {item.name}
+                    </Link>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      }
+
+      // Desktop
       return (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              className={cn(
-                commonClasses,
-                "hover:bg-primary/80", 
-                 isActivePathForDropdown ? "bg-primary text-primary-foreground hover:bg-primary/90" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-              )}
+          <div className={cn("flex items-center group", isActivePage || isDropdownPathActive ? "bg-primary text-primary-foreground rounded-md" : "rounded-md")}>
+            <Link href={link.href} className={linkPartClasses} 
+                  style={isActivePage || isDropdownPathActive ? {} : {backgroundColor: 'transparent', color: 'var(--muted-foreground)'}}
+                  onMouseOver={(e) => { if (!(isActivePage || isDropdownPathActive)) e.currentTarget.style.color = 'var(--foreground)';}}
+                  onMouseOut={(e) => { if (!(isActivePage || isDropdownPathActive)) e.currentTarget.style.color = 'var(--muted-foreground)';}}
             >
               <link.icon className={isMobile ? "h-5 w-5" : "h-4 w-4"} />
               {link.label}
-              <ChevronDown className="h-4 w-4 ml-1 opacity-70" />
-            </Button>
-          </DropdownMenuTrigger>
+            </Link>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className={triggerPartClasses}
+                style={isActivePage || isDropdownPathActive ? {} : {backgroundColor: 'transparent', color: 'var(--muted-foreground)'}}
+                onMouseOver={(e) => { if (!(isActivePage || isDropdownPathActive)) e.currentTarget.style.color = 'var(--foreground)';}}
+                onMouseOut={(e) => { if (!(isActivePage || isDropdownPathActive)) e.currentTarget.style.color = 'var(--muted-foreground)';}}
+              >
+                <ChevronDown className="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+          </div>
           <DropdownMenuContent className="w-56 max-h-96 overflow-y-auto">
             <DropdownMenuLabel>{subMenuLabel}</DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -156,8 +224,10 @@ export function TopNavbar() {
         </DropdownMenu>
       );
     }
+
+    // Links without submenus or when no playlists are configured
     return (
-      <Link href={link.href} className={commonClasses}>
+      <Link href={link.href} className={cn(commonClasses, isMobile ? "" : "px-3 py-2")}>
         <link.icon className={isMobile ? "h-5 w-5" : "h-4 w-4"} />
         {link.label}
       </Link>
@@ -232,6 +302,7 @@ export function TopNavbar() {
         <div 
           className="absolute top-16 left-0 right-0 z-40 border-t border-border/40 bg-background shadow-lg md:hidden"
           onClick={(e) => {
+            // Close if clicking on the backdrop, not on a link itself
             if (e.target === e.currentTarget) {
               setIsMobileMenuOpen(false);
             }
